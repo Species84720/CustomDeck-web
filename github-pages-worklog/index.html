@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Work Log Cloud</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand"><div class="brand-mark" aria-hidden="true">W</div><div><h1>Work Log</h1><p>Plan your day. Track what matters.</p></div></div>
+      <div class="topbar-actions">
+        <button id="btn-import" class="btn" disabled>Import JSON</button>
+        <input id="import-file" type="file" accept="application/json,.json" hidden>
+        <button id="btn-jira-settings" class="btn" disabled>Jira Settings</button>
+        <button id="btn-login" class="btn primary">Sign in with Google</button>
+        <button id="btn-logout" class="btn" hidden>Sign out</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+    <div class="worklog-content">
+    <section class="toolbar card panel-accent">
+      <div class="section-heading"><div><span class="eyebrow">Workspace</span><h2>Time overview</h2></div><button id="btn-new" class="btn primary" disabled>+ New Block</button></div>
+      <div class="row">
+        <div class="tabs" id="view-tabs">
+          <button class="btn tab active" data-view="day">Day</button>
+          <button class="btn tab" data-view="week">Week</button>
+          <button class="btn tab" data-view="month">Month</button>
+          <button class="btn tab" data-view="sprint">Sprint</button>
+        </div>
+        <div id="date-controls" class="toolbar-inline">
+          <label>
+            Date
+            <input id="day-picker" type="date">
+          </label>
+          <button id="btn-today" class="btn">Today</button>
+        </div>
+        <div id="day-nav-controls" class="toolbar-inline">
+          <button id="btn-prev-day" class="btn">&larr; Prev Day</button>
+          <button id="btn-next-day" class="btn">Next Day &rarr;</button>
+        </div>
+        <div id="sprint-controls" class="toolbar-inline" hidden>
+          <label>
+            Sprint
+            <select id="sprint-select">
+              <option value="">Auto / none</option>
+            </select>
+          </label>
+        </div>
+        <label>
+          Tag
+          <select id="filter-tag">
+            <option value="">All</option>
+          </select>
+        </label>
+        <label>
+          Jira
+          <select id="filter-jira">
+            <option value="all">All</option>
+            <option value="linked">Linked</option>
+            <option value="unlinked">Unlinked</option>
+            <option value="logged">Logged</option>
+          </select>
+        </label>
+        <button id="btn-copy-excel" class="btn" disabled>Copy OT Month Rows</button>
+      </div>
+      <div class="row">
+        <span class="muted">Tip: left-drag adds a normal task block. Right-drag opens a slot-type popup (Normal/Overtime).</span>
+      </div>
+      <div class="row compact">
+        <span id="auth-label">Not signed in</span>
+        <span id="jira-label" class="muted">Jira: not loaded</span>
+      </div>
+    </section>
+
+    <section id="day-stats" class="stats">
+      <article class="card stat stat-violet"><div class="stat-icon">▦</div><div><div id="s-count" class="value">0</div><div>Blocks</div></div></article>
+      <article class="card stat stat-blue"><div class="stat-icon">◷</div><div><div id="s-time" class="value">0h 00m</div><div>Total Time</div></div></article>
+      <article class="card stat stat-green"><div class="stat-icon">✓</div><div><div id="s-normal" class="value">0h 00m</div><div>Normal Time</div></div></article>
+      <article class="card stat stat-amber"><div class="stat-icon">↗</div><div><div id="s-overtime" class="value">0h 00m</div><div>Overtime</div></div></article>
+      <article class="card stat stat-cyan"><div class="stat-icon">◆</div><div><div id="s-linked" class="value">0</div><div>Jira Linked</div></div></article>
+      <article class="card stat stat-rose"><div class="stat-icon">!</div><div><div id="s-overlap" class="value">0</div><div>Overlaps</div></div></article>
+    </section>
+
+    <section class="card">
+      <div id="timeline" class="timeline view-panel"></div>
+      <div id="week-view" class="timeline view-panel" hidden></div>
+      <div id="month-view" class="month-grid view-panel" hidden></div>
+      <div id="sprint-view" class="timeline view-panel" hidden></div>
+      <div id="day-popup" class="day-popup" hidden></div>
+    </section>
+    </div>
+    <aside class="todo-panel card" aria-labelledby="todo-title">
+      <div class="todo-header"><div><span class="eyebrow">Focus</span><h2 id="todo-title">My todo list</h2></div><span id="todo-count" class="todo-count">0 left</span></div>
+      <form id="todo-form" class="todo-form"><input id="todo-input" type="text" maxlength="140" placeholder="What needs doing?" aria-label="New todo" required><button class="btn primary todo-add" type="submit" aria-label="Add todo">+</button></form>
+      <div class="todo-progress" aria-hidden="true"><span id="todo-progress-bar"></span></div>
+      <ul id="todo-list" class="todo-list"></ul>
+      <div id="todo-empty" class="todo-empty"><span>✓</span><strong>All clear</strong><p>Add a task above to plan your next step.</p></div>
+      <button id="todo-clear" class="todo-clear" type="button" hidden>Clear completed</button>
+    </aside>
+    </main>
+  </div>
+
+  <dialog id="entry-dialog">
+    <form id="entry-form" method="dialog">
+      <h2 id="entry-title">New Block</h2>
+      <input id="entry-id" type="hidden">
+      <label>Task
+        <input id="f-task" required>
+      </label>
+      <label>Note
+        <textarea id="f-note" rows="2"></textarea>
+      </label>
+      <div class="grid2">
+        <label>Date
+          <input id="f-date" type="date" required>
+        </label>
+        <label>Location
+          <select id="f-location">
+            <option value="work">Work</option>
+            <option value="home">Home</option>
+          </select>
+        </label>
+      </div>
+      <div class="grid2">
+        <label>Tag
+          <select id="f-tag"></select>
+        </label>
+      </div>
+      <div class="grid2">
+        <label>Start
+          <input id="f-start" type="time" required>
+        </label>
+        <label>End
+          <input id="f-end" type="time">
+        </label>
+      </div>
+      <div class="grid2">
+        <label class="jira-field">Jira Issue
+          <input id="f-jira" placeholder="CPM-123">
+          <select id="f-jira-select">
+            <option value="">Pick from Jira issues</option>
+          </select>
+        </label>
+        <label>Close Reason
+          <input id="f-reason" placeholder="Done">
+        </label>
+      </div>
+      <label class="inline"><input id="f-overtime" type="checkbox"> Mark as overtime block</label>
+      <label class="inline"><input id="f-no-jira" type="checkbox"> Never log this item to Jira</label>
+      <label class="inline"><input id="f-jira-logged" type="checkbox"> Already logged in Jira</label>
+      <menu>
+        <button id="btn-delete" type="button" class="btn danger" hidden>Delete</button>
+        <button type="button" id="btn-cancel" class="btn">Cancel</button>
+        <button type="submit" class="btn primary">Save</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <dialog id="slot-type-dialog">
+    <form method="dialog" id="slot-type-form">
+      <h3 style="margin:0 0 8px">Add Timeslot</h3>
+      <p class="muted" style="margin:0 0 10px">Choose slot type for the selected range:</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" value="normal">Normal Slot</button>
+        <button class="btn" value="overtime">Overtime Slot</button>
+        <button class="btn" value="cancel">Cancel</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="jira-settings-dialog">
+    <form method="dialog" id="jira-settings-form">
+      <h2>My Jira Settings</h2>
+      <p class="muted dialog-copy">Save your own Jira account details to your Firebase user settings so the cloud page does not rely on shared visible Jira secrets.</p>
+      <div class="grid2">
+        <label>Jira Base URL
+          <input id="f-jira-base-url" type="url" placeholder="https://your-company.atlassian.net" required>
+        </label>
+        <label>Project Key
+          <input id="f-jira-project" placeholder="CPM" maxlength="32" required>
+        </label>
+      </div>
+      <div class="grid2">
+        <label>Jira Email
+          <input id="f-jira-email" type="email" placeholder="name@company.com" required>
+        </label>
+        <label>API Token
+          <input id="f-jira-api-token" type="password" placeholder="Atlassian API token" autocomplete="new-password">
+        </label>
+      </div>
+      <div class="grid2">
+        <label>Encryption Passphrase
+          <input id="f-jira-passphrase" type="password" placeholder="Passphrase to encrypt or unlock your Jira token" autocomplete="new-password">
+        </label>
+        <label>Confirm Passphrase
+          <input id="f-jira-passphrase-confirm" type="password" placeholder="Only needed when saving or rotating token encryption" autocomplete="new-password">
+        </label>
+      </div>
+      <label class="inline"><input id="f-jira-remember-passphrase" type="checkbox"> Remember passphrase on this device</label>
+      <p class="muted dialog-copy">Optional: this browser can store the Jira unlock passphrase locally so Jira auto-unlocks after sign-in here. Do not enable this on a shared computer.</p>
+      <div id="jira-settings-status" class="muted"></div>
+      <p class="muted dialog-copy">These Jira settings are saved to your own Firebase account document and used only when this signed-in user loads Jira data.</p>
+      <menu>
+        <button id="btn-jira-settings-clear" type="button" class="btn danger">Clear Saved Jira</button>
+        <button id="btn-jira-settings-cancel" type="button" class="btn">Cancel</button>
+        <button type="submit" class="btn primary">Save &amp; Reload Jira</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <script src="./config.js"></script>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
