@@ -718,6 +718,14 @@ function sortedEntries(entries) {
   return [...entries].sort((a, b) => `${a.date || ""}T${a.start || ""}`.localeCompare(`${b.date || ""}T${b.start || ""}`));
 }
 
+function latestOpenCloudEntry(date, beforeStart = "") {
+  const candidates = sortedEntries(allEntries.filter(e =>
+    e.date === date && !isBackgroundSlot(e) && !e.end &&
+    (!beforeStart || mins(e.start) < mins(beforeStart))
+  ));
+  return candidates[candidates.length - 1] || null;
+}
+
 function sortSprintsDesc(items) {
   return [...items].sort((a, b) => String(b?.start || "").localeCompare(String(a?.start || "")));
 }
@@ -1529,19 +1537,21 @@ async function saveEntry(evt) {
   evt.preventDefault();
   if (!currentUser) return;
   const rawId = el.id.value.trim();
+  const endValue = String(el.end.value || "").trim();
+  const reasonValue = String(el.reason.value || "").trim();
   const entry = {
     task: el.task.value.trim(),
     note: el.note.value.trim(),
     date: el.date.value,
     location: normalizeLocation(el.location.value),
     start: el.start.value,
-    end: el.end.value,
+    end: endValue,
     tag: el.tag.value || "other",
     jiraIssue: (el.jira.value || "").trim().toUpperCase(),
     jiraLogged: !!el.jiraLogged.checked,
     noJira: !!el.noJira.checked,
     isOvertime: !!el.overtime.checked,
-    reason: el.reason.value.trim() || "Done",
+    reason: endValue ? (reasonValue || "Done") : "",
     updatedAt: serverTimestamp()
   };
   if (isTimeslotTag(entry.tag)) {
@@ -1574,7 +1584,7 @@ async function applyQuickStartAction(action) {
     jiraLogged: !!action.jiraLogged,
     noJira: !!action.noJira,
     isOvertime: !!action.isOvertime,
-    reason: action.reason || "",
+    reason: "",
     updatedAt: serverTimestamp()
   };
   if (!entry.task) throw new Error("Quick start is missing a task.");
@@ -1586,10 +1596,13 @@ async function applyQuickStartAction(action) {
   const id = action.id || `${entry.date.replaceAll("-", "")}${entry.start.replaceAll(":", "")}_${crypto.randomUUID().slice(0, 8)}`;
   const error = validateRange(entry, id);
   if (error) throw new Error(error);
-  const previousId = action.closePreviousId;
+  // Desktop ids belong to the legacy local log; resolve the open cloud block.
+  const previous = action.source === "custom-deck-desktop"
+    ? latestOpenCloudEntry(entry.date, entry.start)
+    : (action.closePreviousId ? allEntries.find(e => e.id === action.closePreviousId) : null);
+  const previousId = previous?.id || "";
   if (previousId && previousId !== id) {
-    const previous = allEntries.find(e => e.id === previousId && e.date === entry.date && !isBackgroundSlot(e));
-    if (previous && !previous.end && mins(previous.start) < mins(entry.start)) {
+    if (previous && previous.date === entry.date && !isBackgroundSlot(previous) && !previous.end && mins(previous.start) < mins(entry.start)) {
       await setDoc(doc(db, `users/${currentUser.uid}/entries/${previousId}`), {
         end: entry.start,
         updatedAt: serverTimestamp()
@@ -1604,10 +1617,12 @@ async function applyQuickEndAction(action) {
   const date = action.date || el.dayPicker.value || today;
   if (!date || !end) throw new Error("Quick end requires date and end time.");
   let target = null;
-  if (action.id) target = allEntries.find(e => e.id === action.id && !isBackgroundSlot(e));
+  // Ignore local ids from the desktop bridge; Firestore is authoritative.
+  if (action.id && action.source !== "custom-deck-desktop") {
+    target = allEntries.find(e => e.id === action.id && !isBackgroundSlot(e));
+  }
   if (!target) {
-    const candidates = sortedEntries(allEntries.filter(e => e.date === date && !isBackgroundSlot(e) && !e.end && mins(e.start) < mins(end)));
-    target = candidates[candidates.length - 1] || null;
+    target = latestOpenCloudEntry(date, end);
   }
   if (!target) throw new Error("No matching open cloud block was found to close.");
   const patch = {
