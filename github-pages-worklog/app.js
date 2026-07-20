@@ -840,6 +840,17 @@ function jiraIssueStatus(issue) {
   return String(status?.name || status?.value || status || "Status unavailable").trim();
 }
 
+function normalizeJiraIssue(issue) {
+  const fields = issue?.fields || {};
+  return {
+    ...issue,
+    key: String(issue?.key || "").trim().toUpperCase(),
+    summary: String(issue?.summary || fields.summary || "").trim(),
+    issuetype: String(issue?.issuetype?.name || issue?.issuetype || fields.issuetype?.name || fields.issuetype || "").trim(),
+    status: jiraIssueStatus(issue)
+  };
+}
+
 function currentSprint() {
   return sprintCache.find(s => s.start <= today && s.end >= today) || null;
 }
@@ -1663,7 +1674,7 @@ async function fetchJiraIssues() {
     }
     renderCurrentSprintIssues(`Loading ${sprint.name}...`);
     const data = await jiraWorkerFetch(`/jira/issues?sprint=${encodeURIComponent(sprint.name)}`);
-    jiraIssueCache = data.issues || [];
+    jiraIssueCache = (data.issues || []).map(normalizeJiraIssue).filter(issue => issue.key);
     jiraIssueTypeByKey = {};
     jiraIssueSummaryByKey = {};
     jiraIssueCache.forEach(issue => {
