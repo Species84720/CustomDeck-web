@@ -8,9 +8,11 @@ const DAY_GRID_HEIGHT = 900;
 const DAY_START = 5;
 const DAY_END = 22;
 const JIRA_REMEMBERED_PASSPHRASE_STORAGE_KEY = "worklog-jira-passphrase-v1";
+const THEME_STORAGE_KEY = "worklog-theme";
 
 const el = {
   importBtn: document.getElementById("btn-import"),
+  themeBtn: document.getElementById("btn-theme"),
   importFile: document.getElementById("import-file"),
   jiraSettingsBtn: document.getElementById("btn-jira-settings"),
   login: document.getElementById("btn-login"),
@@ -834,8 +836,8 @@ function updateJiraDropdown() {
 }
 
 function jiraIssueStatus(issue) {
-  const status = issue?.status ?? issue?.fields?.status;
-  return String(status?.name || status || "").trim();
+  const status = issue?.status ?? issue?.statusName ?? issue?.status_name ?? issue?.issueStatus ?? issue?.state ?? issue?.fields?.status;
+  return String(status?.name || status?.value || status || "Status unavailable").trim();
 }
 
 function currentSprint() {
@@ -861,7 +863,7 @@ function renderCurrentSprintIssues(message = "") {
   el.sprintIssuesList.innerHTML = jiraIssueCache.map(issue => `
     <button type="button" class="sprint-issue-item" data-jira-issue="${escapeHtml(issue.key)}">
       <span class="badge">${escapeHtml(issue.key)}</span>
-      <span class="sprint-issue-copy"><span>${escapeHtml(issue.summary || "Summary unavailable")}</span>${jiraIssueStatus(issue) ? `<span class="jira-status">${escapeHtml(jiraIssueStatus(issue))}</span>` : ""}</span>
+      <span class="sprint-issue-copy"><span>${escapeHtml(issue.summary || "Summary unavailable")}</span><span class="jira-status">${escapeHtml(jiraIssueStatus(issue))}</span></span>
     </button>`).join("");
 }
 
@@ -1761,6 +1763,18 @@ function friendlyAuthError(err) {
 }
 
 function wireEvents() {
+  const updateThemeButton = () => {
+    const light = document.documentElement.dataset.theme === "light";
+    el.themeBtn.textContent = light ? "☾ Dark" : "☀ Light";
+    el.themeBtn.setAttribute("aria-label", `Switch to ${light ? "dark" : "light"} theme`);
+  };
+  updateThemeButton();
+  el.themeBtn.addEventListener("click", () => {
+    const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+    document.documentElement.dataset.theme = next;
+    localStorage.setItem(THEME_STORAGE_KEY, next);
+    updateThemeButton();
+  });
   el.importBtn.addEventListener("click", () => el.importFile.click());
   el.importFile.addEventListener("change", async () => handleImportFile(el.importFile.files && el.importFile.files[0]));
   el.jiraSettingsBtn.addEventListener("click", openJiraSettingsDialog);

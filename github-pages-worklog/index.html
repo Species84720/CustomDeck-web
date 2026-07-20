@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Work Log Cloud</title>
+  <script>document.documentElement.dataset.theme = localStorage.getItem("worklog-theme") || "dark";</script>
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
@@ -11,6 +12,7 @@
     <header class="topbar">
       <div class="brand"><div class="brand-mark" aria-hidden="true">W</div><div><h1>Work Log</h1><p>Plan your day. Track what matters.</p></div></div>
       <div class="topbar-actions">
+        <button id="btn-theme" class="btn" type="button" aria-label="Switch to light theme">☀ Light</button>
         <button id="btn-import" class="btn" disabled>Import JSON</button>
         <input id="import-file" type="file" accept="application/json,.json" hidden>
         <button id="btn-jira-settings" class="btn" disabled>Jira Settings</button>
@@ -224,7 +226,6 @@
   <script type="module" src="./app.js"></script>
 </body>
 </html>
-
 
 
 
