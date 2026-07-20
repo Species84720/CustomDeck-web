@@ -59,6 +59,8 @@ const el = {
   overtime: document.getElementById("f-overtime"),
   noJira: document.getElementById("f-no-jira"),
   jiraLogged: document.getElementById("f-jira-logged"),
+  sprintIssuesList: document.getElementById("sprint-issues-list"),
+  sprintIssueCount: document.getElementById("sprint-issue-count"),
   slotTypeDialog: document.getElementById("slot-type-dialog"),
   slotTypeForm: document.getElementById("slot-type-form"),
   jiraSettingsDialog: document.getElementById("jira-settings-dialog"),
@@ -538,7 +540,8 @@ async function saveJiraSettings(evt) {
     }
     updateJiraStatus(`Jira: saved ${jiraSettingsSummary(userJiraSettings)} · reloading...`);
     el.jiraSettingsDialog.close();
-    await Promise.all([fetchJiraIssues(), fetchJiraSprints()]);
+    await fetchJiraSprints();
+    await fetchJiraIssues();
     updateJiraStatus();
     render();
   } catch (err) {
@@ -818,7 +821,7 @@ function updateStats(entries) {
 function updateJiraDropdown() {
   if (!el.jiraSelect) return;
   const cur = el.jiraSelect.value;
-  el.jiraSelect.innerHTML = '<option value="">Pick from Jira issues</option>';
+  el.jiraSelect.innerHTML = '<option value="">Pick from current sprint</option>';
   jiraIssueCache.forEach(issue => {
     const option = document.createElement("option");
     option.value = issue.key;
@@ -826,6 +829,34 @@ function updateJiraDropdown() {
     el.jiraSelect.appendChild(option);
   });
   el.jiraSelect.value = cur;
+  renderCurrentSprintIssues();
+}
+
+function currentSprint() {
+  return sprintCache.find(s => s.start <= today && s.end >= today) || null;
+}
+
+function renderCurrentSprintIssues(message = "") {
+  if (!el.sprintIssuesList || !el.sprintIssueCount) return;
+  const sprint = currentSprint();
+  el.sprintIssueCount.textContent = String(jiraIssueCache.length);
+  if (message) {
+    el.sprintIssuesList.innerHTML = `<div class="muted">${escapeHtml(message)}</div>`;
+    return;
+  }
+  if (!sprint) {
+    el.sprintIssuesList.innerHTML = '<div class="muted">No active Jira sprint found.</div>';
+    return;
+  }
+  if (!jiraIssueCache.length) {
+    el.sprintIssuesList.innerHTML = `<div class="muted">No assigned issues in ${escapeHtml(sprint.name)}.</div>`;
+    return;
+  }
+  el.sprintIssuesList.innerHTML = jiraIssueCache.map(issue => `
+    <button type="button" class="sprint-issue-item" data-jira-issue="${escapeHtml(issue.key)}">
+      <span class="badge">${escapeHtml(issue.key)}</span>
+      <span>${escapeHtml(issue.summary || "Summary unavailable")}</span>
+    </button>`).join("");
 }
 
 function resolveSprintSelection() {
@@ -1615,7 +1646,15 @@ async function fetchJiraIssues() {
     return;
   }
   try {
-    const data = await jiraWorkerFetch("/jira/issues");
+    const sprint = currentSprint();
+    if (!sprint) {
+      jiraIssueCache = [];
+      updateJiraDropdown();
+      updateJiraStatus(`Jira: no active sprint found · ${jiraSettingsSummary()}`);
+      return;
+    }
+    renderCurrentSprintIssues(`Loading ${sprint.name}...`);
+    const data = await jiraWorkerFetch(`/jira/issues?sprint=${encodeURIComponent(sprint.name)}`);
     jiraIssueCache = data.issues || [];
     jiraIssueTypeByKey = {};
     jiraIssueSummaryByKey = {};
@@ -1625,10 +1664,11 @@ async function fetchJiraIssues() {
       jiraIssueTypeByKey[key] = String(issue?.issuetype || "");
       jiraIssueSummaryByKey[key] = String(issue?.summary || "").trim();
     });
-    updateJiraStatus(`Jira: ${jiraIssueCache.length} issues loaded · ${jiraSettingsSummary()}`);
+    updateJiraStatus(`Jira: ${jiraIssueCache.length} issues in ${sprint.name} · ${jiraSettingsSummary()}`);
     updateJiraDropdown();
   } catch (err) {
     resetJiraCaches();
+    renderCurrentSprintIssues(String(err.message || err));
     updateJiraStatus(`Jira: ${String(err.message || err)}`);
   }
 }
@@ -1637,15 +1677,18 @@ async function fetchJiraSprints() {
   if (!cfg.jiraWorkerUrl || !hasReadyJiraSettings()) {
     sprintCache = [];
     refreshSprintSelect();
+    renderCurrentSprintIssues();
     return;
   }
   try {
     const data = await jiraWorkerFetch("/jira/sprints");
     sprintCache = sortSprintsDesc((data.sprints || []).map(normalizeSprint));
     refreshSprintSelect();
+    renderCurrentSprintIssues();
   } catch (_) {
     sprintCache = [];
     refreshSprintSelect();
+    renderCurrentSprintIssues();
   }
 }
 
@@ -1754,6 +1797,10 @@ function wireEvents() {
   el.cancelBtn.addEventListener("click", () => el.dialog.close());
   el.jiraSelect.addEventListener("change", () => {
     if (el.jiraSelect.value) el.jira.value = el.jiraSelect.value;
+  });
+  el.sprintIssuesList.addEventListener("click", event => {
+    const issue = event.target.closest("[data-jira-issue]")?.dataset.jiraIssue;
+    if (issue) openEditor(null, { jiraIssue: issue });
   });
 
   el.viewTabs.addEventListener("click", ev => {
@@ -1880,7 +1927,8 @@ async function boot() {
       return;
     }
     await loadJiraSettings();
-    await Promise.all([loadEntries(), fetchJiraIssues(), fetchJiraSprints()]);
+    await Promise.all([loadEntries(), fetchJiraSprints()]);
+    await fetchJiraIssues();
     await applyQuickActionIfNeeded();
     updateSprintAutoOption();
     updateJiraStatus();
@@ -1889,6 +1937,3 @@ async function boot() {
 }
 
 boot();
-
-
-
