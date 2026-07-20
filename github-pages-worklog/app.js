@@ -825,11 +825,17 @@ function updateJiraDropdown() {
   jiraIssueCache.forEach(issue => {
     const option = document.createElement("option");
     option.value = issue.key;
-    option.textContent = `${issue.key} - ${(issue.summary || "").slice(0, 80)}`;
+    const status = jiraIssueStatus(issue);
+    option.textContent = `${issue.key} - ${(issue.summary || "").slice(0, 80)}${status ? ` [${status}]` : ""}`;
     el.jiraSelect.appendChild(option);
   });
   el.jiraSelect.value = cur;
   renderCurrentSprintIssues();
+}
+
+function jiraIssueStatus(issue) {
+  const status = issue?.status ?? issue?.fields?.status;
+  return String(status?.name || status || "").trim();
 }
 
 function currentSprint() {
@@ -855,7 +861,7 @@ function renderCurrentSprintIssues(message = "") {
   el.sprintIssuesList.innerHTML = jiraIssueCache.map(issue => `
     <button type="button" class="sprint-issue-item" data-jira-issue="${escapeHtml(issue.key)}">
       <span class="badge">${escapeHtml(issue.key)}</span>
-      <span>${escapeHtml(issue.summary || "Summary unavailable")}</span>
+      <span class="sprint-issue-copy"><span>${escapeHtml(issue.summary || "Summary unavailable")}</span>${jiraIssueStatus(issue) ? `<span class="jira-status">${escapeHtml(jiraIssueStatus(issue))}</span>` : ""}</span>
     </button>`).join("");
 }
 
