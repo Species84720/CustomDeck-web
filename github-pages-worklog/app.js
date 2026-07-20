@@ -68,6 +68,7 @@ const el = {
   jiraProject: document.getElementById("f-jira-project"),
   jiraEmail: document.getElementById("f-jira-email"),
   jiraApiToken: document.getElementById("f-jira-api-token"),
+  desktopSyncUid: document.getElementById("f-desktop-sync-uid"),
   jiraPassphrase: document.getElementById("f-jira-passphrase"),
   jiraPassphraseConfirm: document.getElementById("f-jira-passphrase-confirm"),
   jiraRememberPassphrase: document.getElementById("f-jira-remember-passphrase"),
@@ -379,6 +380,7 @@ function fillJiraSettingsForm() {
   el.jiraProject.value = settings.project;
   el.jiraEmail.value = settings.email;
   el.jiraApiToken.value = "";
+  el.desktopSyncUid.value = currentUser?.uid || "";
   el.jiraPassphrase.value = "";
   el.jiraPassphraseConfirm.value = "";
   el.jiraRememberPassphrase.checked = hasRememberedJiraPassphrase(currentUser?.uid, settings.encryptedApiToken);
