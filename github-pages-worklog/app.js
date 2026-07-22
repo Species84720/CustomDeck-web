@@ -629,7 +629,7 @@ function renderTodos() {
   list.innerHTML = todos.map(todo => `
     <li class="todo-item${todo.done ? " done" : ""}">
       <label class="todo-check-label"><input type="checkbox" data-todo-action="toggle" data-todo-id="${todo.id}" ${todo.done ? "checked" : ""}><span class="todo-checkbox" aria-hidden="true">✓</span><span class="todo-text">${escapeHtml(todo.text)}</span></label>
-      <button class="todo-delete" type="button" data-todo-action="delete" data-todo-id="${todo.id}" aria-label="Delete todo">×</button>
+      ${todo.done ? "" : `<button class="todo-edit" type="button" data-todo-action="edit" data-todo-id="${todo.id}" aria-label="Edit todo">✎</button>`}<button class="todo-delete" type="button" data-todo-action="delete" data-todo-id="${todo.id}" aria-label="Delete todo">×</button>
     </li>`).join("");
 }
 function wireTodoEvents() {
@@ -648,6 +648,15 @@ function wireTodoEvents() {
     const control = event.target.closest("[data-todo-action]");
     if (!control) return;
     const id = control.dataset.todoId;
+    if (control.dataset.todoAction === "edit") {
+      const todo = todos.find(item => item.id === id && !item.done);
+      if (!todo) return;
+      const edited = window.prompt("Edit to-do item", todo.text);
+      if (edited === null) return;
+      const text = edited.trim();
+      if (!text) return;
+      todo.text = text;
+    }
     if (control.dataset.todoAction === "delete") todos = todos.filter(todo => todo.id !== id);
     if (control.dataset.todoAction === "toggle") {
       const todo = todos.find(item => item.id === id);
