@@ -609,10 +609,45 @@ function escapeHtml(v) {
 function loadTodos() {
   try {
     const saved = JSON.parse(localStorage.getItem(TODO_STORAGE_KEY) || "[]");
-    return Array.isArray(saved) ? saved.filter(item => item && typeof item.text === "string") : [];
+    return normalizeTodos(saved);
   } catch (_) { return []; }
 }
-function saveTodos() { localStorage.setItem(TODO_STORAGE_KEY, JSON.stringify(todos)); }
+function normalizeTodos(items) {
+  return Array.isArray(items)
+    ? items.filter(item => item && typeof item.text === "string" && item.text.trim()).map(item => ({
+        id: String(item.id || crypto.randomUUID()),
+        text: item.text.trim(),
+        done: !!item.done
+      }))
+    : [];
+}
+async function saveTodos() {
+  localStorage.setItem(TODO_STORAGE_KEY, JSON.stringify(todos));
+  if (!currentUser || !db) return;
+  try {
+    await setDoc(doc(db, `users/${currentUser.uid}/settings/todos`), {
+      items: todos,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+  } catch (err) {
+    console.warn("Could not save to-dos to Firebase:", err);
+  }
+}
+async function loadCloudTodos() {
+  if (!currentUser || !db) return;
+  try {
+    const snapshot = await getDoc(doc(db, `users/${currentUser.uid}/settings/todos`));
+    if (snapshot.exists() && Array.isArray(snapshot.data()?.items)) {
+      todos = normalizeTodos(snapshot.data().items);
+      localStorage.setItem(TODO_STORAGE_KEY, JSON.stringify(todos));
+    } else if (todos.length) {
+      await saveTodos();
+    }
+    renderTodos();
+  } catch (err) {
+    console.warn("Could not load to-dos from Firebase:", err);
+  }
+}
 function renderTodos() {
   const list = document.getElementById("todo-list");
   const empty = document.getElementById("todo-empty");
@@ -1981,6 +2016,7 @@ async function boot() {
       render();
       return;
     }
+    await loadCloudTodos();
     await loadJiraSettings();
     await Promise.all([loadEntries(), fetchJiraSprints()]);
     await fetchJiraIssues();
