@@ -329,3 +329,4 @@ html[data-theme="light"] .day-grid { user-select:none; background:#f7f9fc; }
 .jira-context-menu button:hover { background:var(--accent);color:white; }
 .todo-jira { margin-left:5px; }
 @media(max-width:700px){.todo-form{grid-template-columns:1fr 38px}.todo-form input:nth-child(2){grid-column:1/-1;grid-row:2}}
+.jira-editable-label { color:var(--accent);font-size:10px;text-transform:none;letter-spacing:0; }

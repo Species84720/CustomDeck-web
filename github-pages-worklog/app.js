@@ -66,6 +66,7 @@ const el = {
   jiraIssueDialog: document.getElementById("jira-issue-dialog"),
   jiraIssueTitle: document.getElementById("jira-issue-title"),
   jiraIssueBody: document.getElementById("jira-issue-body"),
+  jiraIssueSave: document.getElementById("jira-issue-save"),
   slotTypeDialog: document.getElementById("slot-type-dialog"),
   slotTypeForm: document.getElementById("slot-type-form"),
   jiraSettingsDialog: document.getElementById("jira-settings-dialog"),
@@ -97,6 +98,8 @@ let allEntries = [];
 let jiraIssueCache = [];
 let jiraIssueTypeByKey = {};
 let jiraIssueSummaryByKey = {};
+let jiraIssueEditMeta = {};
+let jiraIssueDraft = null;
 let sprintCache = [];
 let userJiraSettings = emptyJiraSettings();
 let jiraUnlockSource = "";
@@ -1735,39 +1738,90 @@ function jiraDetailText(value, depth = 0) {
   return Object.entries(value).map(([key, item]) => key + ": " + jiraDetailText(item, depth + 1)).filter(row => row.trim()).join(String.fromCharCode(10));
 }
 
-function showJiraIssueDetails(issue) {
+function jiraEditableText(value) {
+  if (value === null || value === undefined) return "";
+  if (Array.isArray(value)) return value.map(jiraEditableText).filter(Boolean).join(", ");
+  if (typeof value === "object") return String(value.displayName || value.name || value.value || value.accountId || "");
+  return String(value);
+}
+
+function jiraAdfFromText(text) {
+  return { type: "doc", version: 1, content: String(text || "").split(String.fromCharCode(10)).map(line => ({
+    type: "paragraph", content: line ? [{ type: "text", text: line }] : []
+  })) };
+}
+
+function jiraFieldInput(fieldId, meta, currentValue) {
+  const value = jiraEditableText(currentValue);
+  const allowed = Array.isArray(meta.allowedValues) ? meta.allowedValues : [];
+  const label = String(meta.name || fieldId);
+  if (allowed.length) {
+    return '<select data-jira-field="' + escapeHtml(fieldId) + '"><option value=""></option>' +
+      allowed.map(item => {
+        const optionValue = String(item.id || item.value || item.name || "");
+        return '<option value="' + escapeHtml(optionValue) + '"' + (optionValue === value ? " selected" : "") + '>' + escapeHtml(String(item.name || item.value || optionValue)) + "</option>";
+      }).join("") + "</select>";
+  }
+  const multiline = fieldId === "description" || label.toLowerCase().includes("description");
+  return multiline ? '<textarea data-jira-field="' + escapeHtml(fieldId) + '" rows="4">' + escapeHtml(value) + "</textarea>"
+    : '<input data-jira-field="' + escapeHtml(fieldId) + '" value="' + escapeHtml(value) + '">';
+}
+
+function showJiraIssueDetails(issue, editMeta = {}) {
+  jiraIssueDraft = issue;
+  jiraIssueEditMeta = editMeta || {};
   const fields = issue.fields || {};
-  const rows = [
-    ["Key", issue.key],
-    ["Summary", fields.summary],
-    ["Description", jiraDetailText(fields.description)],
-    ["Status", fields.status?.name],
-    ["Issue type", fields.issuetype?.name],
-    ["Priority", fields.priority?.name],
-    ["Assignee", fields.assignee?.displayName || fields.assignee?.emailAddress],
-    ["Reporter", fields.reporter?.displayName || fields.reporter?.emailAddress],
-    ["Created", fields.created],
-    ["Updated", fields.updated],
-    ["Labels", fields.labels],
-    ["Components", (fields.components || []).map(item => item.name).join(", ")]
-  ];
-  Object.entries(fields)
-    .filter(([key]) => key.startsWith("customfield_") && jiraDetailText(fields[key]))
-    .forEach(([key, value]) => rows.push([key, jiraDetailText(value)]));
+  const standard = [["summary", "Summary"], ["description", "Description"], ["status", "Status"], ["issuetype", "Issue type"], ["priority", "Priority"], ["assignee", "Assignee"], ["reporter", "Reporter"], ["labels", "Labels"], ["components", "Components"]];
+  const ids = [...new Set([...standard.map(([id]) => id), ...Object.keys(jiraIssueEditMeta)])];
   el.jiraIssueTitle.textContent = String(issue.key || "Jira Issue") + " · " + String(fields.summary || "");
-  el.jiraIssueBody.innerHTML = rows
-    .filter(([, value]) => jiraDetailText(value))
-    .map(([label, value]) => "<div class="jira-detail-row"><div class="jira-detail-label">" + escapeHtml(label) + "</div><div class="jira-detail-value">" + escapeHtml(jiraDetailText(value)) + "</div></div>")
-    .join("");
+  el.jiraIssueBody.innerHTML = ids.map(fieldId => {
+    const meta = jiraIssueEditMeta[fieldId];
+    const raw = fields[fieldId];
+    const value = jiraDetailText(raw);
+    if (!value && !meta) return "";
+    const label = meta?.name || standard.find(item => item[0] === fieldId)?.[1] || fieldId;
+    const editable = !!meta && Array.isArray(meta.operations) && meta.operations.includes("set");
+    const content = editable ? '<div class="jira-field-display">' + escapeHtml(value) + '</div><button type="button" class="btn jira-edit-field" data-jira-edit-field="' + escapeHtml(fieldId) + '">Edit</button>' : '<div class="jira-detail-value">' + escapeHtml(value) + "</div>";
+    return '<div class="jira-detail-row"><div class="jira-detail-label">' + escapeHtml(label) + (editable ? ' <span class="jira-editable-label">editable</span>' : "") + "</div>" + content + "</div>";
+  }).join("");
+  el.jiraIssueSave.hidden = true;
   el.jiraIssueDialog.showModal();
 }
 
 async function viewJiraIssue(issueKey) {
   try {
-    const data = await jiraWorkerFetch("/jira/issue?key=" + encodeURIComponent(issueKey), { key: issueKey });
-    showJiraIssueDetails(data.issue || {});
+    const results = await Promise.all([
+      jiraWorkerFetch("/jira/issue?key=" + encodeURIComponent(issueKey), { key: issueKey }),
+      jiraWorkerFetch("/jira/editmeta?key=" + encodeURIComponent(issueKey), { key: issueKey })
+    ]);
+    showJiraIssueDetails(results[0].issue || {}, results[1].fields || {});
   } catch (err) {
     alert("Could not load " + issueKey + ": " + String(err.message || err));
+  }
+}
+
+async function saveJiraIssueChanges() {
+  if (!jiraIssueDraft?.key) return;
+  const fields = {};
+  el.jiraIssueBody.querySelectorAll("[data-jira-field]").forEach(control => {
+    const fieldId = control.dataset.jiraField;
+    const meta = jiraIssueEditMeta[fieldId] || {};
+    const value = control.value.trim();
+    if (fieldId === "labels") fields[fieldId] = value ? value.split(",").map(item => item.trim()).filter(Boolean) : [];
+    else if (fieldId === "priority") fields[fieldId] = value ? { name: value } : null;
+    else if (String(meta.schema?.type || "").toLowerCase() === "array") fields[fieldId] = value ? value.split(",").map(item => item.trim()).filter(Boolean) : [];
+    else if (fieldId === "description") fields[fieldId] = jiraAdfFromText(value);
+    else fields[fieldId] = value || null;
+  });
+  if (!Object.keys(fields).length) return;
+  try {
+    await jiraWorkerFetch("/jira/update?key=" + encodeURIComponent(jiraIssueDraft.key), { key: jiraIssueDraft.key, fields });
+    const refreshed = await jiraWorkerFetch("/jira/issue?key=" + encodeURIComponent(jiraIssueDraft.key), { key: jiraIssueDraft.key });
+    showJiraIssueDetails(refreshed.issue || jiraIssueDraft, jiraIssueEditMeta);
+    await fetchJiraIssues();
+    alert("Jira issue updated.");
+  } catch (err) {
+    alert("Could not save Jira changes: " + String(err.message || err));
   }
 }
 
@@ -2018,6 +2072,18 @@ function wireEvents() {
   });
   el.form.addEventListener("submit", saveEntry);
   el.jiraSettingsForm.addEventListener("submit", saveJiraSettings);
+  el.jiraIssueSave.addEventListener("click", saveJiraIssueChanges);
+  el.jiraIssueBody.addEventListener("click", event => {
+    const button = event.target.closest("[data-jira-edit-field]");
+    if (!button) return;
+    const fieldId = button.dataset.jiraEditField;
+    const row = button.closest(".jira-detail-row");
+    const meta = jiraIssueEditMeta[fieldId] || {};
+    const raw = jiraIssueDraft?.fields?.[fieldId];
+    button.remove();
+    row.querySelector(".jira-field-display")?.replaceWith(document.createRange().createContextualFragment(jiraFieldInput(fieldId, meta, raw)));
+    el.jiraIssueSave.hidden = false;
+  });
   el.jiraSettingsCancel.addEventListener("click", () => el.jiraSettingsDialog.close());
   el.jiraSettingsClear.addEventListener("click", clearJiraSettings);
   el.cancelBtn.addEventListener("click", () => el.dialog.close());
