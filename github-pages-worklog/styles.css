@@ -330,3 +330,8 @@ html[data-theme="light"] .day-grid { user-select:none; background:#f7f9fc; }
 .todo-jira { margin-left:5px; }
 @media(max-width:700px){.todo-form{grid-template-columns:1fr 38px}.todo-form input:nth-child(2){grid-column:1/-1;grid-row:2}}
 .jira-editable-label { color:var(--accent);font-size:10px;text-transform:none;letter-spacing:0; }
+
+.jira-transition-options { display:grid; gap:8px; margin-top:4px; }
+.jira-transition-option { display:flex; align-items:baseline; justify-content:space-between; gap:12px; width:100%; padding:12px 14px; border:1px solid var(--border); border-radius:8px; background:var(--panel,#172033); color:var(--text); cursor:pointer; text-align:left; font:inherit; }
+.jira-transition-option:hover, .jira-transition-option:focus-visible { border-color:var(--accent); background:color-mix(in srgb, var(--accent) 16%, var(--panel,#172033)); outline:none; }
+.jira-transition-option span { color:var(--muted); font-size:12px; }

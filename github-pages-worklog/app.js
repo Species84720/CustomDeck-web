@@ -75,6 +75,11 @@ const el = {
   todoEditCancel: document.getElementById("todo-edit-cancel"),
   slotTypeDialog: document.getElementById("slot-type-dialog"),
   slotTypeForm: document.getElementById("slot-type-form"),
+  jiraTransitionDialog: document.getElementById("jira-transition-dialog"),
+  jiraTransitionTitle: document.getElementById("jira-transition-title"),
+  jiraTransitionSubtitle: document.getElementById("jira-transition-subtitle"),
+  jiraTransitionOptions: document.getElementById("jira-transition-options"),
+  jiraTransitionCancel: document.getElementById("jira-transition-cancel"),
   jiraSettingsDialog: document.getElementById("jira-settings-dialog"),
   jiraSettingsForm: document.getElementById("jira-settings-form"),
   jiraSettingsStatus: document.getElementById("jira-settings-status"),
@@ -1857,22 +1862,67 @@ async function saveJiraIssueChanges() {
   }
 }
 
+function chooseJiraTransition(issueKey, transitions) {
+  const available = transitions.filter(item => item.to && String(item.name || "").trim().toLowerCase() !== String(item.to || "").trim().toLowerCase());
+  if (!available.length) return Promise.resolve(null);
+  return new Promise(resolve => {
+    const dialog = el.jiraTransitionDialog;
+    const options = el.jiraTransitionOptions;
+    if (!dialog || !options) { resolve(null); return; }
+    el.jiraTransitionTitle.textContent = "Move " + issueKey;
+    el.jiraTransitionSubtitle.textContent = "Choose the destination status:";
+    options.replaceChildren();
+    let settled = false;
+    const finish = value => {
+      if (settled) return;
+      settled = true;
+      dialog.removeEventListener("cancel", onCancel);
+      options.removeEventListener("click", onClick);
+      el.jiraTransitionCancel.onclick = null;
+      if (dialog.open) dialog.close();
+      resolve(value);
+    };
+    const onCancel = event => { event.preventDefault(); finish(null); };
+    const onClick = event => {
+      const button = event.target.closest("[data-jira-transition-index]");
+      if (!button) return;
+      finish(available[Number(button.dataset.jiraTransitionIndex)] || null);
+    };
+    available.forEach((transition, index) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "jira-transition-option";
+      button.dataset.jiraTransitionIndex = String(index);
+      const destination = String(transition.to || "Next status");
+      const transitionName = String(transition.name || "").trim();
+      button.innerHTML = "<strong></strong><span></span>";
+      button.querySelector("strong").textContent = destination;
+      button.querySelector("span").textContent = transitionName && transitionName.toLowerCase() !== destination.toLowerCase() ? " via " + transitionName : "";
+      options.appendChild(button);
+    });
+    options.addEventListener("click", onClick);
+    el.jiraTransitionCancel.onclick = () => finish(null);
+    dialog.addEventListener("cancel", onCancel);
+    dialog.showModal();
+  });
+}
+
 async function moveJiraIssue(issueKey) {
   try {
     const data = await jiraWorkerFetch("/jira/transitions?key=" + encodeURIComponent(issueKey), { key: issueKey });
     const transitions = data.transitions || [];
-    if (!transitions.length) return alert("No valid Jira transitions are available for " + issueKey + ".");
-    const options = transitions.map((item, index) => (index + 1) + ". " + item.name + " → " + (item.to || "next status")).join(String.fromCharCode(10));
-    const selected = window.prompt("Choose a transition for " + issueKey + ":" + options + "Enter the number:");
-    if (selected === null) return;
-    const index = Number.parseInt(selected, 10) - 1;
-    if (!Number.isInteger(index) || !transitions[index]) return alert("Invalid transition selection.");
+    const selected = chooseJiraTransition(issueKey, transitions);
+    if (!transitions.some(item => item.to && String(item.name || "").trim().toLowerCase() !== String(item.to || "").trim().toLowerCase())) {
+      return alert("No status changes are available for " + issueKey + ".");
+    }
+    const transition = await selected;
+    if (!transition) return;
     await jiraWorkerFetch("/jira/transition?key=" + encodeURIComponent(issueKey), {
       key: issueKey,
-      transitionId: transitions[index].id
+      transitionId: transition.id
     });
     await fetchJiraIssues();
-    alert(issueKey + " moved to " + (transitions[index].to || transitions[index].name) + ".");
+    alert(issueKey + " moved to " + (transition.to || transition.name) + ".");
   } catch (err) {
     alert("Could not move " + issueKey + ": " + String(err.message || err));
   }
