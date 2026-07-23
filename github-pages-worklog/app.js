@@ -1862,8 +1862,12 @@ async function saveJiraIssueChanges() {
   }
 }
 
-function chooseJiraTransition(issueKey, transitions) {
-  const available = transitions.filter(item => item.to && String(item.name || "").trim().toLowerCase() !== String(item.to || "").trim().toLowerCase());
+function chooseJiraTransition(issueKey, transitions, currentStatus = "") {
+  const current = String(currentStatus || "").trim().toLowerCase();
+  const available = transitions.filter(item => {
+    const destination = String(item.to || "").trim().toLowerCase();
+    return destination && (!current || destination !== current);
+  });
   if (!available.length) return Promise.resolve(null);
   return new Promise(resolve => {
     const dialog = el.jiraTransitionDialog;
@@ -1909,13 +1913,18 @@ function chooseJiraTransition(issueKey, transitions) {
 
 async function moveJiraIssue(issueKey) {
   try {
-    const data = await jiraWorkerFetch("/jira/transitions?key=" + encodeURIComponent(issueKey), { key: issueKey });
-    const transitions = data.transitions || [];
-    const selected = chooseJiraTransition(issueKey, transitions);
-    if (!transitions.some(item => item.to && String(item.name || "").trim().toLowerCase() !== String(item.to || "").trim().toLowerCase())) {
-      return alert("No status changes are available for " + issueKey + ".");
-    }
-    const transition = await selected;
+    const [transitionData, issueData] = await Promise.all([
+      jiraWorkerFetch("/jira/transitions?key=" + encodeURIComponent(issueKey), { key: issueKey }),
+      jiraWorkerFetch("/jira/issue?key=" + encodeURIComponent(issueKey), { key: issueKey })
+    ]);
+    const transitions = transitionData.transitions || [];
+    const currentStatus = issueData.issue?.fields?.status?.name || "";
+    const available = transitions.filter(item => {
+      const destination = String(item.to || "").trim().toLowerCase();
+      return destination && (!currentStatus || destination !== String(currentStatus).trim().toLowerCase());
+    });
+    if (!available.length) return alert("No status changes are available for " + issueKey + ".");
+    const transition = await chooseJiraTransition(issueKey, available, currentStatus);
     if (!transition) return;
     await jiraWorkerFetch("/jira/transition?key=" + encodeURIComponent(issueKey), {
       key: issueKey,
@@ -1964,7 +1973,7 @@ function showJiraContextMenu(issueKey, x, y) {
   hideJiraContextMenu();
   const menu = document.createElement("div");
   menu.className = "jira-context-menu";
-  menu.innerHTML = "<button data-jira-menu='view'>View issue</button><button data-jira-menu='move'>Move to next status</button><button data-jira-menu='comment'>Add comment</button><button data-jira-menu='todo'>Add to to-do list</button>";
+  menu.innerHTML = "<button data-jira-menu='view'>View issue</button><button data-jira-menu='move'>Change status</button><button data-jira-menu='comment'>Add comment</button><button data-jira-menu='todo'>Add to to-do list</button>";
   menu.style.left = Math.min(x, window.innerWidth - 190) + "px";
   menu.style.top = Math.min(y, window.innerHeight - 180) + "px";
   menu.addEventListener("click", async event => {
