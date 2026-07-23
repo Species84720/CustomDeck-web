@@ -67,6 +67,12 @@ const el = {
   jiraIssueTitle: document.getElementById("jira-issue-title"),
   jiraIssueBody: document.getElementById("jira-issue-body"),
   jiraIssueSave: document.getElementById("jira-issue-save"),
+  todoEditDialog: document.getElementById("todo-edit-dialog"),
+  todoEditForm: document.getElementById("todo-edit-form"),
+  todoEditId: document.getElementById("todo-edit-id"),
+  todoEditText: document.getElementById("todo-edit-text"),
+  todoEditJira: document.getElementById("todo-edit-jira"),
+  todoEditCancel: document.getElementById("todo-edit-cancel"),
   slotTypeDialog: document.getElementById("slot-type-dialog"),
   slotTypeForm: document.getElementById("slot-type-form"),
   jiraSettingsDialog: document.getElementById("jira-settings-dialog"),
@@ -100,6 +106,7 @@ let jiraIssueTypeByKey = {};
 let jiraIssueSummaryByKey = {};
 let jiraIssueEditMeta = {};
 let jiraIssueDraft = null;
+let todoBeingEdited = null;
 let sprintCache = [];
 let userJiraSettings = emptyJiraSettings();
 let jiraUnlockSource = "";
@@ -670,10 +677,19 @@ function renderTodos() {
   progress.style.width = todos.length ? `${Math.round((completed / todos.length) * 100)}%` : "0%";
   list.innerHTML = todos.map(todo => `
     <li class="todo-item${todo.done ? " done" : ""}">
-      <label class="todo-check-label"><input type="checkbox" data-todo-action="toggle" data-todo-id="${todo.id}" ${todo.done ? "checked" : ""}><span class="todo-checkbox" aria-hidden="true">✓</span><span class="todo-text">${escapeHtml(todo.text)}${todo.jiraIssue ? ` <span class="badge todo-jira">${escapeHtml(todo.jiraIssue)}</span>` : ""}</span></label>
+      <label class="todo-check-label"><input type="checkbox" data-todo-action="toggle" data-todo-id="${todo.id}" ${todo.done ? "checked" : ""}><span class="todo-checkbox" aria-hidden="true">✓</span><span class="todo-text">${escapeHtml(todo.text)}${todo.jiraIssue ? ` <span class="badge todo-jira" data-jira-issue="${escapeHtml(todo.jiraIssue)}">${escapeHtml(todo.jiraIssue)}</span>` : ""}</span></label>
       ${todo.done ? "" : `<button class="todo-edit" type="button" data-todo-action="edit" data-todo-id="${todo.id}" aria-label="Edit todo">✎</button>`}<button class="todo-delete" type="button" data-todo-action="delete" data-todo-id="${todo.id}" aria-label="Delete todo">×</button>
     </li>`).join("");
 }
+function openTodoEditDialog(todo) {
+  if (!todo || todo.done) return;
+  todoBeingEdited = todo;
+  el.todoEditId.value = todo.id;
+  el.todoEditText.value = todo.text || "";
+  el.todoEditJira.value = todo.jiraIssue || "";
+  el.todoEditDialog.showModal();
+}
+
 function wireTodoEvents() {
   const form = document.getElementById("todo-form");
   const input = document.getElementById("todo-input");
@@ -697,11 +713,8 @@ function wireTodoEvents() {
     if (control.dataset.todoAction === "edit") {
       const todo = todos.find(item => item.id === id && !item.done);
       if (!todo) return;
-      const edited = window.prompt("Edit to-do item", todo.text);
-      if (edited === null) return;
-      const text = edited.trim();
-      if (!text) return;
-      todo.text = text;
+      openTodoEditDialog(todo);
+      return;
     }
     if (control.dataset.todoAction === "delete") todos = todos.filter(todo => todo.id !== id);
     if (control.dataset.todoAction === "toggle") {
@@ -711,6 +724,25 @@ function wireTodoEvents() {
     saveTodos(); renderTodos();
   });
   clear.addEventListener("click", () => { todos = todos.filter(todo => !todo.done); saveTodos(); renderTodos(); });
+  el.todoEditCancel.addEventListener("click", () => el.todoEditDialog.close());
+  el.todoEditForm.addEventListener("submit", event => {
+    event.preventDefault();
+    if (!todoBeingEdited) return;
+    const text = el.todoEditText.value.trim();
+    if (!text) return;
+    todoBeingEdited.text = text;
+    todoBeingEdited.jiraIssue = el.todoEditJira.value.trim().toUpperCase();
+    saveTodos(); renderTodos();
+    todoBeingEdited = null;
+    el.todoEditDialog.close();
+  });
+  list.addEventListener("contextmenu", event => {
+    const issue = event.target.closest("[data-jira-issue]")?.dataset.jiraIssue;
+    if (!issue) return;
+    event.preventDefault();
+    event.stopPropagation();
+    showJiraContextMenu(issue, event.clientX, event.clientY);
+  });
   renderTodos();
 }
 
@@ -1831,10 +1863,7 @@ async function moveJiraIssue(issueKey) {
     const transitions = data.transitions || [];
     if (!transitions.length) return alert("No valid Jira transitions are available for " + issueKey + ".");
     const options = transitions.map((item, index) => (index + 1) + ". " + item.name + " → " + (item.to || "next status")).join(String.fromCharCode(10));
-    const selected = window.prompt("Choose a transition for " + issueKey + ":
-" + options + "
-
-Enter the number:");
+    const selected = window.prompt("Choose a transition for " + issueKey + ":" + options + "Enter the number:");
     if (selected === null) return;
     const index = Number.parseInt(selected, 10) - 1;
     if (!Number.isInteger(index) || !transitions[index]) return alert("Invalid transition selection.");
@@ -1885,7 +1914,7 @@ function showJiraContextMenu(issueKey, x, y) {
   hideJiraContextMenu();
   const menu = document.createElement("div");
   menu.className = "jira-context-menu";
-  menu.innerHTML = "<button data-jira-menu="view">View issue</button><button data-jira-menu="move">Move to next status</button><button data-jira-menu="comment">Add comment</button><button data-jira-menu="todo">Add to to-do list</button>";
+  menu.innerHTML = "<button data-jira-menu='view'>View issue</button><button data-jira-menu='move'>Move to next status</button><button data-jira-menu='comment'>Add comment</button><button data-jira-menu='todo'>Add to to-do list</button>";
   menu.style.left = Math.min(x, window.innerWidth - 190) + "px";
   menu.style.top = Math.min(y, window.innerHeight - 180) + "px";
   menu.addEventListener("click", async event => {

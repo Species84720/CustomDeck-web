@@ -167,6 +167,19 @@
     </form>
   </dialog>
 
+  <dialog id="todo-edit-dialog">
+    <form id="todo-edit-form" method="dialog">
+      <h2>Edit to-do item</h2>
+      <input id="todo-edit-id" type="hidden">
+      <label>Description
+        <textarea id="todo-edit-text" rows="5" maxlength="500" required></textarea>
+      </label>
+      <label>Jira issue
+        <input id="todo-edit-jira" maxlength="32" placeholder="Optional issue key">
+      </label>
+      <menu><button type="button" id="todo-edit-cancel" class="btn">Cancel</button><button type="submit" class="btn primary">Save</button></menu>
+    </form>
+  </dialog>
   <dialog id="jira-issue-dialog">
     <form method="dialog">
       <h2 id="jira-issue-title">Jira Issue</h2>
