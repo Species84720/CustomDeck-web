@@ -284,7 +284,7 @@ body { background-color:#080b14; background-image:radial-gradient(circle at 12% 
 .todo-panel::before { content:"";position:absolute;width:150px;height:150px;right:-70px;top:-80px;border-radius:50%;background:#7c5cff22;filter:blur(4px);pointer-events:none; }
 .todo-header { display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:16px; }
 .todo-count { border:1px solid #4d3d83;background:#251e45;color:#bdadff;border-radius:999px;padding:3px 9px;font-size:11px;font-weight:700; }
-.todo-form { display:grid;grid-template-columns:1fr 38px;gap:7px; }
+.todo-form { display:grid;grid-template-columns:minmax(0,1fr) 132px 38px;gap:7px; }
 .todo-form input { width:100%;min-width:0; }.todo-add{padding:0;font-size:21px}
 .todo-progress { height:3px;margin:13px 0 15px;border-radius:4px;overflow:hidden;background:#252b3c; }.todo-progress span{display:block;height:100%;width:0;border-radius:inherit;background:linear-gradient(90deg,#7c5cff,#32d6c4);transition:width .25s ease}
 .todo-list { display:grid;gap:7px;list-style:none;margin:0;padding:0;max-height:calc(100vh - 310px);overflow:auto; }
@@ -319,3 +319,13 @@ html[data-theme="light"] .todo-count { background:#ebe8ff;border-color:#cbc2ff;c
 html[data-theme="light"] .todo-progress { background:#dce3ed; }
 html[data-theme="light"] .jira-status { background:#e1f4fa;border-color:#9ed8e8;color:#17637a; }
 html[data-theme="light"] .day-grid { user-select:none; background:#f7f9fc; }
+
+.jira-issue-details { display:grid;gap:10px;max-height:65vh;overflow:auto;min-width:min(620px,80vw); }
+.jira-detail-row { display:grid;gap:3px;padding-bottom:8px;border-bottom:1px solid var(--border); }
+.jira-detail-label { color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.06em; }
+.jira-detail-value { white-space:pre-wrap;overflow-wrap:anywhere; }
+.jira-context-menu { position:fixed;z-index:1000;display:grid;gap:3px;padding:5px;background:var(--panel,#172033);border:1px solid var(--border);border-radius:8px;box-shadow:0 12px 30px #0008; }
+.jira-context-menu button { border:0;background:transparent;color:var(--text);padding:7px 12px;text-align:left;border-radius:5px;cursor:pointer;font:inherit;white-space:nowrap; }
+.jira-context-menu button:hover { background:var(--accent);color:white; }
+.todo-jira { margin-left:5px; }
+@media(max-width:700px){.todo-form{grid-template-columns:1fr 38px}.todo-form input:nth-child(2){grid-column:1/-1;grid-row:2}}

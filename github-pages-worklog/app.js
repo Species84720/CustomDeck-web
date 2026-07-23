@@ -63,6 +63,9 @@ const el = {
   jiraLogged: document.getElementById("f-jira-logged"),
   sprintIssuesList: document.getElementById("sprint-issues-list"),
   sprintIssueCount: document.getElementById("sprint-issue-count"),
+  jiraIssueDialog: document.getElementById("jira-issue-dialog"),
+  jiraIssueTitle: document.getElementById("jira-issue-title"),
+  jiraIssueBody: document.getElementById("jira-issue-body"),
   slotTypeDialog: document.getElementById("slot-type-dialog"),
   slotTypeForm: document.getElementById("slot-type-form"),
   jiraSettingsDialog: document.getElementById("jira-settings-dialog"),
@@ -617,7 +620,8 @@ function normalizeTodos(items) {
     ? items.filter(item => item && typeof item.text === "string" && item.text.trim()).map(item => ({
         id: String(item.id || crypto.randomUUID()),
         text: item.text.trim(),
-        done: !!item.done
+        done: !!item.done,
+        jiraIssue: String(item.jiraIssue || "").trim().toUpperCase()
       }))
     : [];
 }
@@ -663,21 +667,25 @@ function renderTodos() {
   progress.style.width = todos.length ? `${Math.round((completed / todos.length) * 100)}%` : "0%";
   list.innerHTML = todos.map(todo => `
     <li class="todo-item${todo.done ? " done" : ""}">
-      <label class="todo-check-label"><input type="checkbox" data-todo-action="toggle" data-todo-id="${todo.id}" ${todo.done ? "checked" : ""}><span class="todo-checkbox" aria-hidden="true">✓</span><span class="todo-text">${escapeHtml(todo.text)}</span></label>
+      <label class="todo-check-label"><input type="checkbox" data-todo-action="toggle" data-todo-id="${todo.id}" ${todo.done ? "checked" : ""}><span class="todo-checkbox" aria-hidden="true">✓</span><span class="todo-text">${escapeHtml(todo.text)}${todo.jiraIssue ? ` <span class="badge todo-jira">${escapeHtml(todo.jiraIssue)}</span>` : ""}</span></label>
       ${todo.done ? "" : `<button class="todo-edit" type="button" data-todo-action="edit" data-todo-id="${todo.id}" aria-label="Edit todo">✎</button>`}<button class="todo-delete" type="button" data-todo-action="delete" data-todo-id="${todo.id}" aria-label="Delete todo">×</button>
     </li>`).join("");
 }
 function wireTodoEvents() {
   const form = document.getElementById("todo-form");
   const input = document.getElementById("todo-input");
+  const jiraInput = document.getElementById("todo-jira");
   const list = document.getElementById("todo-list");
   const clear = document.getElementById("todo-clear");
   form.addEventListener("submit", event => {
     event.preventDefault();
     const text = input.value.trim();
     if (!text) return;
-    todos.unshift({ id: crypto.randomUUID(), text, done: false });
-    input.value = ""; saveTodos(); renderTodos();
+    const jiraIssue = String(jiraInput?.value || "").trim().toUpperCase();
+    todos.unshift({ id: crypto.randomUUID(), text, jiraIssue, done: false });
+    input.value = "";
+    if (jiraInput) jiraInput.value = "";
+    saveTodos(); renderTodos();
   });
   list.addEventListener("click", event => {
     const control = event.target.closest("[data-todo-action]");
@@ -1713,6 +1721,132 @@ async function removeEntry(id) {
   await loadEntries();
 }
 
+function jiraDetailText(value, depth = 0) {
+  if (value === null || value === undefined || depth > 4) return "";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return value.map(item => jiraDetailText(item, depth + 1)).filter(Boolean).join(", ");
+  if (value.type === "doc" || value.type === "paragraph" || value.type === "bulletList" || value.type === "orderedList" || value.type === "listItem") {
+    return (value.content || []).map(item => jiraDetailText(item, depth + 1)).filter(Boolean).join(value.type === "paragraph" ? "" : "
+");
+  }
+  if (value.text) return String(value.text);
+  if (value.displayName) return String(value.displayName);
+  if (value.name) return String(value.name);
+  if (value.value) return jiraDetailText(value.value, depth + 1);
+  return Object.entries(value).map(([key, item]) => key + ": " + jiraDetailText(item, depth + 1)).filter(row => row.trim()).join("
+");
+}
+
+function showJiraIssueDetails(issue) {
+  const fields = issue.fields || {};
+  const rows = [
+    ["Key", issue.key],
+    ["Summary", fields.summary],
+    ["Description", jiraDetailText(fields.description)],
+    ["Status", fields.status?.name],
+    ["Issue type", fields.issuetype?.name],
+    ["Priority", fields.priority?.name],
+    ["Assignee", fields.assignee?.displayName || fields.assignee?.emailAddress],
+    ["Reporter", fields.reporter?.displayName || fields.reporter?.emailAddress],
+    ["Created", fields.created],
+    ["Updated", fields.updated],
+    ["Labels", fields.labels],
+    ["Components", (fields.components || []).map(item => item.name).join(", ")]
+  ];
+  Object.entries(fields)
+    .filter(([key]) => key.startsWith("customfield_") && jiraDetailText(fields[key]))
+    .forEach(([key, value]) => rows.push([key, jiraDetailText(value)]));
+  el.jiraIssueTitle.textContent = String(issue.key || "Jira Issue") + " · " + String(fields.summary || "");
+  el.jiraIssueBody.innerHTML = rows
+    .filter(([, value]) => jiraDetailText(value))
+    .map(([label, value]) => "<div class="jira-detail-row"><div class="jira-detail-label">" + escapeHtml(label) + "</div><div class="jira-detail-value">" + escapeHtml(jiraDetailText(value)) + "</div></div>")
+    .join("");
+  el.jiraIssueDialog.showModal();
+}
+
+async function viewJiraIssue(issueKey) {
+  try {
+    const data = await jiraWorkerFetch("/jira/issue?key=" + encodeURIComponent(issueKey), { key: issueKey });
+    showJiraIssueDetails(data.issue || {});
+  } catch (err) {
+    alert("Could not load " + issueKey + ": " + String(err.message || err));
+  }
+}
+
+async function moveJiraIssue(issueKey) {
+  try {
+    const data = await jiraWorkerFetch("/jira/transitions?key=" + encodeURIComponent(issueKey), { key: issueKey });
+    const transitions = data.transitions || [];
+    if (!transitions.length) return alert("No valid Jira transitions are available for " + issueKey + ".");
+    const options = transitions.map((item, index) => (index + 1) + ". " + item.name + " → " + (item.to || "next status")).join("
+");
+    const selected = window.prompt("Choose a transition for " + issueKey + ":
+" + options + "
+
+Enter the number:");
+    if (selected === null) return;
+    const index = Number.parseInt(selected, 10) - 1;
+    if (!Number.isInteger(index) || !transitions[index]) return alert("Invalid transition selection.");
+    await jiraWorkerFetch("/jira/transition?key=" + encodeURIComponent(issueKey), {
+      key: issueKey,
+      transitionId: transitions[index].id
+    });
+    await fetchJiraIssues();
+    alert(issueKey + " moved to " + (transitions[index].to || transitions[index].name) + ".");
+  } catch (err) {
+    alert("Could not move " + issueKey + ": " + String(err.message || err));
+  }
+}
+
+async function commentOnJiraIssue(issueKey) {
+  const comment = window.prompt("Comment on " + issueKey + " (you can include @ mentions):");
+  if (comment === null || !comment.trim()) return;
+  try {
+    await jiraWorkerFetch("/jira/comment?key=" + encodeURIComponent(issueKey), {
+      key: issueKey,
+      comment
+    });
+    alert("Comment added to " + issueKey + ".");
+  } catch (err) {
+    alert("Could not add the comment: " + String(err.message || err));
+  }
+}
+
+async function addTodoForJira(issueKey) {
+  const summary = jiraIssueSummaryByKey[issueKey] || "";
+  const existing = todos.find(item => item.jiraIssue === issueKey && !item.done);
+  if (existing) return alert(issueKey + " is already in your open to-do list.");
+  todos.unshift({
+    id: crypto.randomUUID(),
+    text: summary ? issueKey + ": " + summary : issueKey,
+    jiraIssue: issueKey,
+    done: false
+  });
+  await saveTodos();
+  renderTodos();
+}
+
+function hideJiraContextMenu() {
+  document.querySelector(".jira-context-menu")?.remove();
+}
+
+function showJiraContextMenu(issueKey, x, y) {
+  hideJiraContextMenu();
+  const menu = document.createElement("div");
+  menu.className = "jira-context-menu";
+  menu.innerHTML = "<button data-jira-menu="view">View issue</button><button data-jira-menu="move">Move to next status</button><button data-jira-menu="comment">Add comment</button><button data-jira-menu="todo">Add to to-do list</button>";
+  menu.style.left = Math.min(x, window.innerWidth - 190) + "px";
+  menu.style.top = Math.min(y, window.innerHeight - 180) + "px";
+  menu.addEventListener("click", async event => {
+    const action = event.target.closest("[data-jira-menu]")?.dataset.jiraMenu;
+    hideJiraContextMenu();
+    if (action === "view") await viewJiraIssue(issueKey);
+    if (action === "move") await moveJiraIssue(issueKey);
+    if (action === "comment") await commentOnJiraIssue(issueKey);
+    if (action === "todo") await addTodoForJira(issueKey);
+  });
+  document.body.appendChild(menu);
+}
 async function fetchJiraIssues() {
   if (!cfg.jiraWorkerUrl) {
     updateJiraStatus("Jira: worker URL not configured");
@@ -1896,6 +2030,16 @@ function wireEvents() {
   el.sprintIssuesList.addEventListener("click", event => {
     const issue = event.target.closest("[data-jira-issue]")?.dataset.jiraIssue;
     if (issue) openEditor(null, { jiraIssue: issue });
+  });
+  el.sprintIssuesList.addEventListener("contextmenu", event => {
+    const issue = event.target.closest("[data-jira-issue]")?.dataset.jiraIssue;
+    if (!issue) return;
+    event.preventDefault();
+    event.stopPropagation();
+    showJiraContextMenu(issue, event.clientX, event.clientY);
+  });
+  document.addEventListener("click", event => {
+    if (!event.target.closest(".jira-context-menu")) hideJiraContextMenu();
   });
 
   el.viewTabs.addEventListener("click", ev => {
