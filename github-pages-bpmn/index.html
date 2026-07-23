@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BPMN Vault</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div><span class="eyebrow">Encrypted library</span><h1>BPMN Vault</h1></div>
+      <div class="account"><span id="user-label"></span><button id="sign-out" class="button subtle" hidden>Sign out</button></div>
+    </header>
+
+    <section id="login-panel" class="card auth-panel">
+      <h2>Sign in to your vault</h2>
+      <p>Use your Google account, then unlock the encrypted BPMN library with its vault password.</p>
+      <button id="google-sign-in" class="button primary">Continue with Google</button>
+      <p id="auth-status" class="status"></p>
+    </section>
+
+    <section id="vault-panel" hidden>
+      <div class="card unlock-bar">
+        <div><strong id="welcome-label">Vault locked</strong><p id="vault-status">Enter the vault password to load branches.</p></div>
+        <div class="unlock-actions"><input id="vault-password" type="password" autocomplete="current-password" placeholder="Vault password"><button id="unlock" class="button primary">Unlock</button></div>
+      </div>
+
+      <div id="library" hidden class="library-grid">
+        <aside class="card sidebar">
+          <div class="section-heading"><div><span class="eyebrow">Branches</span><h2>Versions</h2></div><button id="upload-open" class="button small">Update</button></div>
+          <input id="branch-search" class="search" type="search" placeholder="Search branches">
+          <div id="branch-list" class="branch-list"></div>
+        </aside>
+        <section class="card viewer-panel">
+          <div class="section-heading"><div><span class="eyebrow">Read only</span><h2 id="branch-title">Select a branch</h2></div><span id="file-count" class="pill"></span></div>
+          <div class="file-toolbar"><input id="file-search" class="search" type="search" placeholder="Search BPMN files"><span id="viewer-status" class="status"></span></div>
+          <div class="content-grid"><div id="file-list" class="file-list"></div><div id="canvas" class="canvas"><div class="empty">Select a BPMN file to view it.</div></div></div>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="upload-dialog">
+    <form id="upload-form" method="dialog">
+      <h2>Update branch BPMNs</h2>
+      <p class="muted">Choose a local branch folder. Existing files with the same relative path are replaced. Files are encrypted in your browser before upload.</p>
+      <label>Branch name<input id="upload-branch" required placeholder="feature/my-process"></label>
+      <label>BPMN folder<input id="upload-files" type="file" webkitdirectory directory multiple required></label>
+      <p id="upload-status" class="status"></p>
+      <menu><button id="upload-cancel" type="button" class="button subtle">Cancel</button><button type="submit" class="button primary">Encrypt and upload</button></menu>
+    </form>
+  </dialog>
+
+  <script src="https://unpkg.com/bpmn-js@9.4.1/dist/bpmn-viewer.production.min.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

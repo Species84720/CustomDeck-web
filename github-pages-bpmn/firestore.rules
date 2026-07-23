@@ -1,0 +1,11 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid}/bpmnVault/{branchId} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+      match /files/{fileId} {
+        allow read, write: if request.auth != null && request.auth.uid == uid;
+      }
+    }
+  }
+}
