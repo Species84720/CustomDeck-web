@@ -1726,15 +1726,13 @@ function jiraDetailText(value, depth = 0) {
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
   if (Array.isArray(value)) return value.map(item => jiraDetailText(item, depth + 1)).filter(Boolean).join(", ");
   if (value.type === "doc" || value.type === "paragraph" || value.type === "bulletList" || value.type === "orderedList" || value.type === "listItem") {
-    return (value.content || []).map(item => jiraDetailText(item, depth + 1)).filter(Boolean).join(value.type === "paragraph" ? "" : "
-");
+    return (value.content || []).map(item => jiraDetailText(item, depth + 1)).filter(Boolean).join(value.type === "paragraph" ? "" : String.fromCharCode(10));
   }
   if (value.text) return String(value.text);
   if (value.displayName) return String(value.displayName);
   if (value.name) return String(value.name);
   if (value.value) return jiraDetailText(value.value, depth + 1);
-  return Object.entries(value).map(([key, item]) => key + ": " + jiraDetailText(item, depth + 1)).filter(row => row.trim()).join("
-");
+  return Object.entries(value).map(([key, item]) => key + ": " + jiraDetailText(item, depth + 1)).filter(row => row.trim()).join(String.fromCharCode(10));
 }
 
 function showJiraIssueDetails(issue) {
@@ -1778,8 +1776,7 @@ async function moveJiraIssue(issueKey) {
     const data = await jiraWorkerFetch("/jira/transitions?key=" + encodeURIComponent(issueKey), { key: issueKey });
     const transitions = data.transitions || [];
     if (!transitions.length) return alert("No valid Jira transitions are available for " + issueKey + ".");
-    const options = transitions.map((item, index) => (index + 1) + ". " + item.name + " → " + (item.to || "next status")).join("
-");
+    const options = transitions.map((item, index) => (index + 1) + ". " + item.name + " → " + (item.to || "next status")).join(String.fromCharCode(10));
     const selected = window.prompt("Choose a transition for " + issueKey + ":
 " + options + "
 
