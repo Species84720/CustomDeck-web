@@ -861,6 +861,10 @@ function updateStats(entries) {
     if (e.jiraIssue) linked += 1;
     const dur = e.end ? Math.max(0, mins(e.end) - mins(e.start)) : 0;
     total += dur;
+  });
+  const selectedDate = el.dayPicker.value;
+  allEntries.filter(e => e.date === selectedDate && isBackgroundSlot(e)).forEach(e => {
+    const dur = e.end ? Math.max(0, mins(e.end) - mins(e.start)) : 0;
     if (e.isOvertime || e.tag === "overtime") overtime += dur;
     else normal += dur;
   });
@@ -1104,6 +1108,7 @@ function buildDayGrid(entries) {
 
   grid.addEventListener("mousedown", ev => {
     if (ev.button !== 0 && ev.button !== 2) return;
+    ev.preventDefault();
     if (ev.button === 2) {
       ev.preventDefault();
       suppressContextMenuUntil = Date.now() + 1200;
@@ -1161,7 +1166,7 @@ function buildDayGrid(entries) {
     });
   });
 
-  grid.addEventListener("contextmenu", ev => ev.preventDefault());
+  grid.addEventListener("contextmenu", ev => { ev.preventDefault(); ev.stopPropagation(); }, true)
 
   return grid;
 }
@@ -1971,8 +1976,11 @@ function wireEvents() {
   });
 
   document.addEventListener("contextmenu", ev => {
-    if (Date.now() < suppressContextMenuUntil) ev.preventDefault();
-  });
+    const target = ev.target instanceof Element ? ev.target : null;
+    if (target?.closest("#day-grid") || Date.now() < suppressContextMenuUntil) {
+      ev.preventDefault();
+    }
+  }, true);
 }
 
 function initFirebase() {

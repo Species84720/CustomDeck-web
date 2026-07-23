@@ -99,7 +99,7 @@ input:focus, textarea:focus, select:focus {
 .stat .value { font-size: 20px; font-weight: 700; line-height: 1.1; }
 .timeline { display: grid; gap: 8px; }
 .view-panel[hidden] { display: none !important; }
-.day-grid {
+.day-grid { user-select:none;
   position: relative;
   height: 900px;
   background: #0c1320;
@@ -318,4 +318,4 @@ html[data-theme="light"] .todo-item,html[data-theme="light"] .sprint-issue-item 
 html[data-theme="light"] .todo-count { background:#ebe8ff;border-color:#cbc2ff;color:#5949bb; }
 html[data-theme="light"] .todo-progress { background:#dce3ed; }
 html[data-theme="light"] .jira-status { background:#e1f4fa;border-color:#9ed8e8;color:#17637a; }
-html[data-theme="light"] .day-grid { background:#f7f9fc; }
+html[data-theme="light"] .day-grid { user-select:none; background:#f7f9fc; }
