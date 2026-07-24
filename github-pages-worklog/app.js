@@ -5,7 +5,7 @@ import { getFirestore, collection, doc, getDoc, getDocs, setDoc, deleteDoc, writ
 const cfg = window.WORKLOG_CONFIG || {};
 const TAGS = ["task", "story", "bug", "meeting", "support", "working-hours", "overtime", "other"];
 const DAY_GRID_HEIGHT = 900;
-const DAY_START_MINUTES = 5 * 60 + 30;
+const DAY_START_MINUTES = 5 * 60;
 const DAY_END_DEFAULT_MINUTES = 19 * 60;
 const JIRA_REMEMBERED_PASSPHRASE_STORAGE_KEY = "worklog-jira-passphrase-v1";
 const THEME_STORAGE_KEY = "worklog-theme";
