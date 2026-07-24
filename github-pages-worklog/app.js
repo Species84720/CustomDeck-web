@@ -6,7 +6,7 @@ const cfg = window.WORKLOG_CONFIG || {};
 const TAGS = ["task", "story", "bug", "meeting", "support", "working-hours", "overtime", "other"];
 const DAY_GRID_HEIGHT = 900;
 const DAY_START_MINUTES = 5 * 60;
-const DAY_END_DEFAULT_MINUTES = 19 * 60;
+const DAY_END_DEFAULT_MINUTES = 16 * 60;
 const JIRA_REMEMBERED_PASSPHRASE_STORAGE_KEY = "worklog-jira-passphrase-v1";
 const THEME_STORAGE_KEY = "worklog-theme";
 
@@ -683,6 +683,7 @@ function normalizeTodos(items) {
         text: item.text.trim(),
         done: !!item.done,
         jiraIssue: String(item.jiraIssue || "").trim().toUpperCase(),
+        createdAt: String(item.createdAt || item.addedAt || ""),
         completedAt: item.done ? String(item.completedAt || item.finishedAt || item.closedAt || new Date().toISOString()) : "",
         completedDate: item.done ? String(item.completedDate || item.finishedDate || item.closedDate || localDateKey(item.completedAt || item.finishedAt || item.closedAt || new Date())).slice(0, 10) : ""
       }))
@@ -736,7 +737,7 @@ function renderTodos() {
   progress.style.width = todos.length ? `${Math.round((completed / todos.length) * 100)}%` : "0%";
   list.innerHTML = visibleOpen.map(todo => `
     <li class="todo-item">
-      <label class="todo-check-label"><input type="checkbox" data-todo-action="toggle" data-todo-id="${todo.id}"><span class="todo-checkbox" aria-hidden="true">✓</span><span class="todo-text-wrap"><span class="todo-text">${escapeHtml(todo.text)}${todo.jiraIssue ? ` <span class="badge todo-jira" data-jira-issue="${escapeHtml(todo.jiraIssue)}">${escapeHtml(todo.jiraIssue)}</span>` : ""}</span></span></label>
+      <label class="todo-check-label"><input type="checkbox" data-todo-action="toggle" data-todo-id="${todo.id}"><span class="todo-checkbox" aria-hidden="true">✓</span><span class="todo-text-wrap"><span class="todo-text">${escapeHtml(todo.text)}${todo.jiraIssue ? ` <span class="badge todo-jira" data-jira-issue="${escapeHtml(todo.jiraIssue)}">${escapeHtml(todo.jiraIssue)}</span>` : ""}</span>${todo.createdAt ? `<span class="todo-meta">Added ${escapeHtml(localDateTimeLabel(todo.createdAt))}</span>` : ""}</span></label>
       <button class="todo-edit" type="button" data-todo-action="edit" data-todo-id="${todo.id}" aria-label="Edit todo">✎</button><button class="todo-delete" type="button" data-todo-action="delete" data-todo-id="${todo.id}" aria-label="Delete todo">×</button>
     </li>`).join("");
   if (finishedList && finishedSection && finishedTitle) {
@@ -746,7 +747,7 @@ function renderTodos() {
       const locked = todoIsLocked(todo);
       const canUndo = !locked;
       return `<li class="todo-item done${locked ? " locked" : ""}">
-        <label class="todo-check-label">${canUndo ? `<input type="checkbox" data-todo-action="toggle" data-todo-id="${todo.id}" checked>` : ""}<span class="todo-checkbox" aria-hidden="true">✓</span><span class="todo-text-wrap"><span class="todo-text">${escapeHtml(todo.text)}${todo.jiraIssue ? ` <span class="badge todo-jira" data-jira-issue="${escapeHtml(todo.jiraIssue)}">${escapeHtml(todo.jiraIssue)}</span>` : ""}</span><span class="todo-meta">Finished ${escapeHtml(localDateTimeLabel(todo.completedAt || todo.completedDate))}${locked ? " · locked" : " · can undo today"}</span></span></label>
+        <label class="todo-check-label">${canUndo ? `<input type="checkbox" data-todo-action="toggle" data-todo-id="${todo.id}" checked>` : ""}<span class="todo-checkbox" aria-hidden="true">✓</span><span class="todo-text-wrap"><span class="todo-text">${escapeHtml(todo.text)}${todo.jiraIssue ? ` <span class="badge todo-jira" data-jira-issue="${escapeHtml(todo.jiraIssue)}">${escapeHtml(todo.jiraIssue)}</span>` : ""}</span>${todo.createdAt ? `<span class="todo-meta">Added ${escapeHtml(localDateTimeLabel(todo.createdAt))}</span>` : ""}<span class="todo-meta">Finished ${escapeHtml(localDateTimeLabel(todo.completedAt || todo.completedDate))}${locked ? " · locked" : " · can undo today"}</span></span></label>
       </li>`;
     }).join("");
   }
@@ -789,7 +790,7 @@ function wireTodoEvents() {
     const text = input.value.trim();
     if (!text) return;
     const jiraIssue = String(jiraInput?.value || "").trim().toUpperCase();
-    todos.unshift({ id: crypto.randomUUID(), text, jiraIssue, done: false, completedAt: "", completedDate: "" });
+    todos.unshift({ id: crypto.randomUUID(), text, jiraIssue, done: false, createdAt: new Date().toISOString(), completedAt: "", completedDate: "" });
     input.value = "";
     if (jiraInput) jiraInput.value = "";
     saveTodos(); renderTodos();
@@ -1262,14 +1263,17 @@ function buildDayGrid(entries) {
 
   grid.addEventListener("mousedown", ev => {
     if (ev.button !== 0 && ev.button !== 2) return;
+    const target = ev.target;
+    const targetElement = target instanceof Element ? target : null;
+    const dayBlock = targetElement?.closest(".day-block");
+    const workBand = targetElement?.closest(".work-band");
+    if (dayBlock) return;
+    if (workBand && ev.button === 2) return;
     ev.preventDefault();
     if (ev.button === 2) {
       ev.preventDefault();
       suppressContextMenuUntil = Date.now() + 1200;
     }
-    const target = ev.target;
-    const targetElement = target instanceof Element ? target : null;
-    if (targetElement && targetElement.closest(".day-block, .work-band")) return;
     const rect = grid.getBoundingClientRect();
     const y = Math.max(0, Math.min(rect.height, ev.clientY - rect.top));
     const ghost = document.createElement("div");
@@ -2074,7 +2078,10 @@ async function addTodoForJira(issueKey) {
     id: crypto.randomUUID(),
     text: summary ? issueKey + ": " + summary : issueKey,
     jiraIssue: issueKey,
-    done: false
+    done: false,
+    createdAt: new Date().toISOString(),
+    completedAt: "",
+    completedDate: ""
   });
   await saveTodos();
   renderTodos();
