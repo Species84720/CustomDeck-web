@@ -24,7 +24,15 @@
     <section id="vault-panel" hidden>
       <div class="card unlock-bar">
         <div><strong id="welcome-label">Vault locked</strong><p id="vault-status">Enter the vault password to load branches.</p></div>
-        <div class="unlock-actions"><input id="vault-password" type="password" autocomplete="current-password" placeholder="Vault password"><button id="unlock" class="button primary">Unlock</button></div>
+        <div class="unlock-actions">
+          <input id="vault-password" type="password" autocomplete="current-password" placeholder="Vault password">
+          <button id="unlock" class="button primary">Unlock</button>
+          <div class="vault-action-buttons">
+            <button id="upload-open" class="button subtle" type="button" disabled>Upload / Update Branch</button>
+            <button id="share-open" class="button subtle" type="button" disabled>Share Branch</button>
+            <button id="rotate-open" class="button subtle" type="button" disabled>Change Key</button>
+          </div>
+        </div>
       </div>
 
       <div id="library" hidden class="library-grid">
@@ -41,6 +49,49 @@
       </div>
     </section>
   </main>
+  <dialog id="upload-dialog">
+    <form id="upload-form" method="dialog">
+      <h2>Upload or update a branch</h2>
+      <label>Branch name<input id="upload-branch" type="text" autocomplete="off" placeholder="Example: main"></label>
+      <label>BPMN files or folder<input id="upload-files" type="file" accept=".bpmn,.xml" multiple webkitdirectory directory></label>
+      <p class="muted">If the selected branch already exists, the uploaded BPMN set replaces its current files.</p>
+      <p id="upload-status" class="status"></p>
+      <menu>
+        <button id="upload-cancel" class="button subtle" type="button">Cancel</button>
+        <button class="button primary" type="submit">Save branch</button>
+      </menu>
+    </form>
+  </dialog>
+  <dialog id="share-dialog">
+    <form id="share-form" method="dialog">
+      <h2>Share branch</h2>
+      <p id="share-branch-label" class="muted">Choose a branch to share.</p>
+      <label>Share with email<input id="share-email" type="text" autocomplete="email" placeholder="name@example.com"></label>
+      <div>
+        <div class="eyebrow">Current access</div>
+        <div id="share-members" class="member-list"></div>
+      </div>
+      <p id="share-status" class="status"></p>
+      <menu>
+        <button id="share-cancel" class="button subtle" type="button">Cancel</button>
+        <button class="button primary" type="submit">Share branch</button>
+      </menu>
+    </form>
+  </dialog>
+  <dialog id="rotate-dialog">
+    <form id="rotate-form" method="dialog">
+      <h2>Change vault key</h2>
+      <p class="muted">This re-encrypts every branch you currently unlocked. Anyone you shared those branches with will need the new password.</p>
+      <label>Current password<input id="rotate-current-password" type="password" autocomplete="current-password" placeholder="Current vault password"></label>
+      <label>New password<input id="rotate-new-password" type="password" autocomplete="new-password" placeholder="New vault password"></label>
+      <label>Confirm new password<input id="rotate-confirm-password" type="password" autocomplete="new-password" placeholder="Repeat the new vault password"></label>
+      <p id="rotate-status" class="status"></p>
+      <menu>
+        <button id="rotate-cancel" class="button subtle" type="button">Cancel</button>
+        <button class="button primary" type="submit">Change key</button>
+      </menu>
+    </form>
+  </dialog>
 <script src="https://unpkg.com/bpmn-js@9.4.1/dist/bpmn-viewer.production.min.js"></script>
   <script src="config.js"></script>
   <script type="module" src="app.js"></script>

@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
-import { getFirestore, collection, doc, deleteDoc, getDoc, getDocs, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+import { getFirestore, collection, doc, deleteDoc, getDoc, getDocs, query, setDoc, serverTimestamp, where } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
 const cfg = window.BPMN_VAULT_CONFIG?.firebase;
 const $ = id => document.getElementById(id);
@@ -12,9 +12,12 @@ const el = {
   branchSidebar: $("branch-sidebar"), libraryGrid: $("library"), contentGrid: $("content-grid"), filePane: $("file-pane"),
   fileList: $("file-list"), viewerStatus: $("viewer-status"), canvas: $("canvas"), diagramHost: $("diagram-host"), canvasEmpty: $("canvas-empty"),
   navigateUp: $("navigate-up"), navPath: $("nav-path"), toggleBranches: $("toggle-branches"), toggleBranchesToolbar: $("toggle-branches-toolbar"), toggleFiles: $("toggle-files"), toggleProps: $("toggle-props"),
+  uploadOpen: $("upload-open"), shareOpen: $("share-open"), rotateOpen: $("rotate-open"),
   zoomIn: $("zoom-in"), zoomOut: $("zoom-out"), zoomFit: $("zoom-fit"), propsPanel: $("props-panel"), propsContent: $("props-content"), uploadDialog: $("upload-dialog"),
-  uploadOpen: null, uploadForm: $("upload-form"), uploadBranch: $("upload-branch"), uploadFiles: $("upload-files"),
-  uploadCancel: $("upload-cancel"), uploadStatus: $("upload-status")
+  uploadForm: $("upload-form"), uploadBranch: $("upload-branch"), uploadFiles: $("upload-files"),
+  uploadCancel: $("upload-cancel"), uploadStatus: $("upload-status"),
+  shareDialog: $("share-dialog"), shareForm: $("share-form"), shareBranchLabel: $("share-branch-label"), shareEmail: $("share-email"), shareMembers: $("share-members"), shareCancel: $("share-cancel"), shareStatus: $("share-status"),
+  rotateDialog: $("rotate-dialog"), rotateForm: $("rotate-form"), rotateCurrentPassword: $("rotate-current-password"), rotateNewPassword: $("rotate-new-password"), rotateConfirmPassword: $("rotate-confirm-password"), rotateCancel: $("rotate-cancel"), rotateStatus: $("rotate-status")
 };
 
 let auth, db, user, branches = [], activeBranch = null, viewer;
@@ -30,6 +33,7 @@ let currentRootElement = null;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const MAX_FILE_BYTES = 900000;
+const SHARED_BRANCH_COLLECTION = "bpmnVaultBranches";
 
 function status(message, error = false) {
   el.vaultStatus.textContent = message;
@@ -47,6 +51,11 @@ function friendlyAuthError(error) {
 function bytesToBase64(bytes) { let binary = ""; bytes.forEach(byte => binary += String.fromCharCode(byte)); return btoa(binary); }
 function base64ToBytes(value) { const binary = atob(value); return Uint8Array.from(binary, char => char.charCodeAt(0)); }
 function randomBase64(size = 16) { return bytesToBase64(crypto.getRandomValues(new Uint8Array(size))); }
+function normalizeEmail(value) { return String(value || "").trim().toLowerCase(); }
+function uniqueEmails(values) {
+  return [...new Set(values.map(normalizeEmail).filter(value => value && value.includes("@")))];
+}
+function signedInEmail() { return normalizeEmail(user?.email); }
 async function sha256(value) {
   const hash = await crypto.subtle.digest("SHA-256", encoder.encode(value));
   return [...new Uint8Array(hash)].map(byte => byte.toString(16).padStart(2, "0")).join("");
@@ -64,8 +73,11 @@ async function open(key, payload) {
   const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: base64ToBytes(payload.iv) }, key, base64ToBytes(payload.data));
   return decoder.decode(plain);
 }
-function branchRef(branchId) { return doc(db, "users", user.uid, "bpmnVault", branchId); }
-function fileCollection(branchId) { return collection(db, "users", user.uid, "bpmnVault", branchId, "files"); }
+function sharedBranchRef(branchId) { return doc(db, SHARED_BRANCH_COLLECTION, branchId); }
+function sharedFileCollection(branchId) { return collection(db, SHARED_BRANCH_COLLECTION, branchId, "files"); }
+function legacyBranchCollection() { return collection(db, "users", user.uid, "bpmnVault"); }
+function legacyBranchRef(branchId) { return doc(db, "users", user.uid, "bpmnVault", branchId); }
+function legacyFileCollection(branchId) { return collection(db, "users", user.uid, "bpmnVault", branchId, "files"); }
 function isBpmn(file) { return /\.bpmn(?:20\.xml)?$/i.test(file.name); }
 function escapeHtml(value) {
   return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
@@ -78,6 +90,85 @@ function fileDirFromPath(path) {
   const parts = String(path).split("/");
   parts.pop();
   return parts.join("/") || "Root folder";
+}
+function branchMembership(branch) {
+  return uniqueEmails(branch?.memberEmails || []);
+}
+function branchOwnerLabel(branch) {
+  return normalizeEmail(branch?.ownerEmail) || "Unknown owner";
+}
+function updateVaultActions() {
+  const unlocked = !!vaultPassword;
+  const hasBranch = !!activeBranch;
+  if (el.uploadOpen) el.uploadOpen.disabled = !unlocked;
+  if (el.shareOpen) el.shareOpen.disabled = !unlocked || !hasBranch;
+  if (el.rotateOpen) el.rotateOpen.disabled = !unlocked || !branches.length;
+}
+function closeDialog(dialog) {
+  dialog?.close();
+}
+function openUploadDialog() {
+  if (!vaultPassword) return;
+  el.uploadForm.reset();
+  el.uploadStatus.textContent = "";
+  el.uploadBranch.value = activeBranch?.name || "";
+  el.uploadDialog.showModal();
+}
+function renderShareMembers(branch = activeBranch) {
+  const members = branchMembership(branch);
+  el.shareMembers.innerHTML = members.length ? members.map(email => `<div class="member-chip">${escapeHtml(email)}</div>`).join("") : '<div class="empty small-empty">Only you have access.</div>';
+}
+function openShareDialog() {
+  if (!activeBranch) return;
+  el.shareForm.reset();
+  el.shareStatus.textContent = "";
+  el.shareBranchLabel.textContent = `Share “${activeBranch.name}” from ${branchOwnerLabel(activeBranch)}.`;
+  renderShareMembers(activeBranch);
+  el.shareDialog.showModal();
+}
+function openRotateDialog() {
+  if (!vaultPassword || !branches.length) return;
+  el.rotateForm.reset();
+  el.rotateStatus.textContent = "";
+  el.rotateCurrentPassword.value = vaultPassword;
+  el.rotateDialog.showModal();
+}
+async function sharedBranchIdForName(branchName) {
+  return sha256(`shared-branch:${user.uid}:${branchName}`);
+}
+async function migrateLegacyBranches() {
+  if (!user || !vaultPassword) return;
+  const snapshot = await getDocs(legacyBranchCollection());
+  for (const item of snapshot.docs) {
+    const data = item.data();
+    let branchName = "";
+    try {
+      const key = await deriveKey(vaultPassword, data.salt);
+      branchName = await open(key, data.name);
+    } catch (_) {
+      continue;
+    }
+    const branchId = await sharedBranchIdForName(branchName);
+    const targetRef = sharedBranchRef(branchId);
+    const target = await getDoc(targetRef);
+    if (target.exists()) continue;
+    const memberEmails = uniqueEmails([signedInEmail()]);
+    await setDoc(targetRef, {
+      salt: data.salt,
+      name: data.name,
+      fileCount: Number(data.fileCount || 0),
+      ownerUid: user.uid,
+      ownerEmail: user.email || "",
+      memberEmails,
+      createdAt: data.createdAt || serverTimestamp(),
+      updatedAt: data.updatedAt || serverTimestamp(),
+      migratedFromLegacy: true
+    }, { merge: true });
+    const legacyFiles = await getDocs(legacyFileCollection(item.id));
+    for (const file of legacyFiles.docs) {
+      await setDoc(doc(sharedFileCollection(branchId), file.id), file.data(), { merge: true });
+    }
+  }
 }
 function asArray(value) { return Array.isArray(value) ? value : []; }
 function nsKey(name) { return String(name || "").split(":").pop(); }
@@ -618,21 +709,47 @@ async function signIn() {
   }
 }
 async function loadBranches() {
-  const snapshot = await getDocs(collection(db, "users", user.uid, "bpmnVault"));
+  await migrateLegacyBranches();
+  const email = signedInEmail();
+  if (!email) throw new Error("This account does not expose an email address for branch sharing.");
+  const snapshot = await getDocs(query(collection(db, SHARED_BRANCH_COLLECTION), where("memberEmails", "array-contains", email)));
   const loaded = [];
+  let skipped = 0;
   for (const item of snapshot.docs) {
     const data = item.data();
     try {
       const key = await deriveKey(vaultPassword, data.salt);
       const name = await open(key, data.name);
-      loaded.push({ id: item.id, name, key, count: Number(data.fileCount || 0) });
-    } catch (_) { throw new Error("The vault password is incorrect or a branch is corrupted."); }
+      loaded.push({
+        id: item.id,
+        name,
+        key,
+        salt: data.salt,
+        count: Number(data.fileCount || 0),
+        memberEmails: branchMembership(data),
+        ownerUid: data.ownerUid || "",
+        ownerEmail: data.ownerEmail || "",
+        files: []
+      });
+    } catch (_) {
+      skipped += 1;
+    }
   }
   branches = loaded.sort((a, b) => a.name.localeCompare(b.name));
   renderBranches();
   el.library.hidden = false;
-  if (branches.length) await selectBranch(branches[0].id);
-  else { el.branchTitle.textContent = "No branches yet"; el.fileCount.textContent = ""; }
+  if (branches.length) await selectBranch(activeBranch?.id && branches.some(branch => branch.id === activeBranch.id) ? activeBranch.id : branches[0].id);
+  else {
+    activeBranch = null;
+    renderFiles();
+    renderProps(null);
+    el.branchTitle.textContent = snapshot.empty ? "No branches yet" : "No readable branches";
+    el.fileCount.textContent = "";
+    showCanvasMessage(snapshot.empty ? "Upload a BPMN branch to get started." : "No shared branches match this vault password.");
+  }
+  updateVaultActions();
+  if (!branches.length && !snapshot.empty) throw new Error("No shared branches match this vault password.");
+  return { loadedCount: branches.length, skippedCount: skipped };
 }
 function renderBranches() {
   const term = el.branchSearch.value.trim().toLowerCase();
@@ -640,6 +757,7 @@ function renderBranches() {
   branches.filter(branch => branch.name.toLowerCase().includes(term)).forEach(branch => {
     const button = document.createElement("button");
     button.className = "branch-item" + (activeBranch?.id === branch.id ? " active" : "");
+    button.title = `${branch.name}\nOwner: ${branchOwnerLabel(branch)}\nShared with: ${branchMembership(branch).join(", ") || "only you"}`;
     button.textContent = branch.name;
     button.onclick = () => selectBranch(branch.id);
     el.branchList.appendChild(button);
@@ -653,7 +771,7 @@ async function selectBranch(branchId) {
   renderBranches();
   el.branchTitle.textContent = activeBranch.name;
   el.viewerStatus.textContent = "Loading files...";
-  const snapshot = await getDocs(fileCollection(activeBranch.id));
+  const snapshot = await getDocs(sharedFileCollection(activeBranch.id));
   activeBranch.files = [];
   for (const item of snapshot.docs) {
     try {
@@ -669,6 +787,7 @@ async function selectBranch(branchId) {
   currentRootElement = null;
   updateNavigationState(null);
   el.viewerStatus.textContent = "";
+  updateVaultActions();
 }
 function renderFiles() {
   const term = el.fileSearch.value.trim().toLowerCase();
@@ -707,13 +826,27 @@ async function uploadBranch(event) {
   if (files.some(file => file.size > MAX_FILE_BYTES)) { el.uploadStatus.textContent = "Each BPMN file must be smaller than 900 KB for Firestore."; return; }
   el.uploadStatus.textContent = "Encrypting and uploading...";
   try {
-    const branchId = await sha256(`branch:${branchName}`);
-    const existing = await getDoc(branchRef(branchId));
+    const branchToUpdate = activeBranch?.name === branchName
+      ? activeBranch
+      : branches.find(branch => branch.name === branchName && branch.ownerUid === user.uid) || null;
+    const branchId = branchToUpdate?.id || await sharedBranchIdForName(branchName);
+    const existing = await getDoc(sharedBranchRef(branchId));
     const salt = existing.exists() ? existing.data().salt : randomBase64();
     const key = await deriveKey(vaultPassword, salt);
     const name = await seal(key, branchName);
-    await setDoc(branchRef(branchId), { salt, name, fileCount: files.length, updatedAt: serverTimestamp() }, { merge: true });
-    const oldFiles = await getDocs(fileCollection(branchId));
+    const existingData = existing.exists() ? existing.data() : {};
+    const memberEmails = uniqueEmails([...(existingData.memberEmails || branchToUpdate?.memberEmails || []), signedInEmail()]);
+    await setDoc(sharedBranchRef(branchId), {
+      salt,
+      name,
+      fileCount: files.length,
+      ownerUid: existingData.ownerUid || branchToUpdate?.ownerUid || user.uid,
+      ownerEmail: existingData.ownerEmail || branchToUpdate?.ownerEmail || user.email || "",
+      memberEmails,
+      createdAt: existingData.createdAt || serverTimestamp(),
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+    const oldFiles = await getDocs(sharedFileCollection(branchId));
     await Promise.all(oldFiles.docs.map(item => deleteDoc(item.ref)));
     for (const file of files) {
       const path = file.webkitRelativePath || file.name;
@@ -722,7 +855,7 @@ async function uploadBranch(event) {
       const xml = await file.text();
       const fileId = await sha256(`file:${relativePath}`);
       const payload = await seal(key, JSON.stringify({ path: relativePath, xml }));
-      await setDoc(doc(fileCollection(branchId), fileId), { payload, updatedAt: serverTimestamp() });
+      await setDoc(doc(sharedFileCollection(branchId), fileId), { payload, updatedAt: serverTimestamp() });
     }
     el.uploadDialog.close();
     el.uploadForm.reset();
@@ -730,20 +863,99 @@ async function uploadBranch(event) {
     status(`Branch “${branchName}” updated.`);
   } catch (error) { el.uploadStatus.textContent = error.message || "Upload failed."; }
 }
+async function shareBranch(event) {
+  event.preventDefault();
+  if (!activeBranch) return;
+  const emails = uniqueEmails(el.shareEmail.value.split(/[\s,;]+/));
+  if (!emails.length) {
+    el.shareStatus.textContent = "Enter at least one valid email address.";
+    return;
+  }
+  el.shareStatus.textContent = "Updating access...";
+  try {
+    const merged = uniqueEmails([...branchMembership(activeBranch), ...emails, signedInEmail()]);
+    await setDoc(sharedBranchRef(activeBranch.id), { memberEmails: merged, updatedAt: serverTimestamp() }, { merge: true });
+    activeBranch.memberEmails = merged;
+    renderShareMembers(activeBranch);
+    el.shareEmail.value = "";
+    el.shareStatus.textContent = `Shared with ${emails.join(", ")}.`;
+    renderBranches();
+  } catch (error) {
+    el.shareStatus.textContent = error.message || "Could not update sharing.";
+  }
+}
+async function rotateVaultKey(event) {
+  event.preventDefault();
+  const currentPassword = el.rotateCurrentPassword.value;
+  const nextPassword = el.rotateNewPassword.value;
+  const confirmPassword = el.rotateConfirmPassword.value;
+  if (currentPassword !== vaultPassword) { el.rotateStatus.textContent = "Current password does not match the unlocked vault."; return; }
+  if (nextPassword.length < 8) { el.rotateStatus.textContent = "Use a new vault password of at least 8 characters."; return; }
+  if (nextPassword !== confirmPassword) { el.rotateStatus.textContent = "The new password confirmation does not match."; return; }
+  if (!branches.length) { el.rotateStatus.textContent = "Unlock at least one branch before changing the key."; return; }
+  el.rotateStatus.textContent = "Re-encrypting branches...";
+  try {
+    for (const branch of branches) {
+      const fileSnapshot = await getDocs(sharedFileCollection(branch.id));
+      const payloads = [];
+      for (const file of fileSnapshot.docs) {
+        payloads.push({ id: file.id, xml: await open(branch.key, file.data().payload) });
+      }
+      const nextSalt = randomBase64();
+      const nextKey = await deriveKey(nextPassword, nextSalt);
+      const sealedName = await seal(nextKey, branch.name);
+      await setDoc(sharedBranchRef(branch.id), { salt: nextSalt, name: sealedName, updatedAt: serverTimestamp() }, { merge: true });
+      for (const payload of payloads) {
+        await setDoc(doc(sharedFileCollection(branch.id), payload.id), { payload: await seal(nextKey, payload.xml), updatedAt: serverTimestamp() }, { merge: true });
+      }
+    }
+    vaultPassword = nextPassword;
+    el.password.value = nextPassword;
+    closeDialog(el.rotateDialog);
+    await loadBranches();
+    status("Vault key changed. Shared users now need the new password.");
+  } catch (error) {
+    el.rotateStatus.textContent = error.message || "Could not change the vault key.";
+  }
+}
 async function unlock() {
   const password = el.password.value;
   if (password.length < 8) { status("Use a vault password of at least 8 characters.", true); return; }
   vaultPassword = password;
   el.unlock.disabled = true;
   status("Decrypting branches...");
-  try { await loadBranches(); status("Vault unlocked."); }
-  catch (error) { vaultPassword = ""; status(error.message, true); }
-  finally { el.unlock.disabled = false; }
+  try {
+    const { loadedCount, skippedCount } = await loadBranches();
+    const summary = loadedCount ? `Vault unlocked.${skippedCount ? ` ${skippedCount} branch${skippedCount === 1 ? "" : "es"} use a different password.` : ""}` : "Vault unlocked.";
+    status(summary);
+  }
+  catch (error) {
+    vaultPassword = "";
+    branches = [];
+    activeBranch = null;
+    activeFileId = null;
+    el.library.hidden = true;
+    renderBranches();
+    renderFiles();
+    renderProps(null);
+    showCanvasMessage("Select a BPMN file to view it.");
+    status(error.message, true);
+  }
+  finally { el.unlock.disabled = false; updateVaultActions(); }
 }
 function wire() {
   el.signIn.onclick = signIn;
   el.signOut.onclick = () => signOut(auth);
   el.unlock.onclick = unlock;
+  el.uploadOpen.onclick = openUploadDialog;
+  el.shareOpen.onclick = openShareDialog;
+  el.rotateOpen.onclick = openRotateDialog;
+  el.uploadForm.onsubmit = uploadBranch;
+  el.uploadCancel.onclick = () => closeDialog(el.uploadDialog);
+  el.shareForm.onsubmit = shareBranch;
+  el.shareCancel.onclick = () => closeDialog(el.shareDialog);
+  el.rotateForm.onsubmit = rotateVaultKey;
+  el.rotateCancel.onclick = () => closeDialog(el.rotateDialog);
   el.navigateUp.onclick = navigateUp;
   el.toggleBranches.onclick = () => setBranchesOpen(!branchesOpen);
   el.toggleBranchesToolbar.onclick = () => setBranchesOpen(!branchesOpen);
@@ -762,6 +974,7 @@ function boot() {
   setFilesOpen(true);
   setPropsOpen(true);
   renderProps(null);
+  updateVaultActions();
   if (!cfg || cfg.apiKey === "REPLACE_ME") { el.authStatus.textContent = "Copy config.example.js to config.js and add your Firebase web configuration."; el.signIn.disabled = true; return; }
   const app = initializeApp(cfg);
   auth = getAuth(app); db = getFirestore(app);
@@ -770,7 +983,8 @@ function boot() {
     el.login.hidden = !!user; el.vault.hidden = !user; el.signOut.hidden = !user;
     el.userLabel.textContent = user ? (user.email || user.displayName || "Signed in") : "";
     if (user) { el.welcome.textContent = `Signed in as ${user.email || user.displayName}`; status("Enter the vault password to load branches."); }
-    else { vaultPassword = ""; branches = []; activeBranch = null; activeFileId = null; el.library.hidden = true; showCanvasMessage("Select a BPMN file to view it."); }
+    else { vaultPassword = ""; branches = []; activeBranch = null; activeFileId = null; el.library.hidden = true; renderFiles(); showCanvasMessage("Select a BPMN file to view it."); }
+    updateVaultActions();
   });
 }
 boot();
