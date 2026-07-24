@@ -11,7 +11,7 @@ const el = {
   branchList: $("branch-list"), branchTitle: $("branch-title"), fileCount: $("file-count"), fileSearch: $("file-search"),
   branchSidebar: $("branch-sidebar"), libraryGrid: $("library"), contentGrid: $("content-grid"), filePane: $("file-pane"),
   fileList: $("file-list"), viewerStatus: $("viewer-status"), canvas: $("canvas"), diagramHost: $("diagram-host"), canvasEmpty: $("canvas-empty"),
-  toggleBranches: $("toggle-branches"), toggleFiles: $("toggle-files"), toggleProps: $("toggle-props"),
+  toggleBranches: $("toggle-branches"), toggleBranchesToolbar: $("toggle-branches-toolbar"), toggleFiles: $("toggle-files"), toggleProps: $("toggle-props"),
   zoomIn: $("zoom-in"), zoomOut: $("zoom-out"), zoomFit: $("zoom-fit"), propsPanel: $("props-panel"), propsContent: $("props-content"), uploadDialog: $("upload-dialog"),
   uploadOpen: null, uploadForm: $("upload-form"), uploadBranch: $("upload-branch"), uploadFiles: $("upload-files"),
   uploadCancel: $("upload-cancel"), uploadStatus: $("upload-status")
@@ -101,6 +101,24 @@ function extensionValues(bo, ...types) {
   const names = new Set(types.map(type => nsKey(type)));
   return asArray(bo?.extensionElements?.values).filter(value => names.has(nsKey(value?.$type)));
 }
+function deepFindExtensions(source, ...types) {
+  const names = new Set(types.map(type => nsKey(type)));
+  const results = [];
+  const seen = new WeakSet();
+  function walk(value) {
+    if (!value || typeof value !== "object") return;
+    if (seen.has(value)) return;
+    seen.add(value);
+    if (names.has(nsKey(value.$type))) results.push(value);
+    for (const [key, child] of Object.entries(value)) {
+      if (key.startsWith("$") || key === "parent" || key === "labels" || key === "sourceRef" || key === "targetRef" || key === "incoming" || key === "outgoing") continue;
+      if (Array.isArray(child)) child.forEach(walk);
+      else if (child && typeof child === "object") walk(child);
+    }
+  }
+  walk(source?.extensionElements);
+  return results;
+}
 function listenerImplementation(listener) {
   const className = readNamedValue(listener, "class");
   const delegateExpression = readNamedValue(listener, "delegateExpression");
@@ -124,7 +142,8 @@ function fieldDetails(field) {
 }
 function readListeners(bo, kind) {
   const types = kind === "task" ? ["activiti:TaskListener", "camunda:TaskListener"] : ["activiti:ExecutionListener", "camunda:ExecutionListener"];
-  return extensionValues(bo, ...types).map(listener => {
+  const sources = [bo, ...asArray(bo?.eventDefinitions)];
+  return sources.flatMap(source => deepFindExtensions(source, ...types)).map(listener => {
     const impl = listenerImplementation(listener);
     return {
       event: readNamedValue(listener, "event") || "—",
@@ -135,21 +154,43 @@ function readListeners(bo, kind) {
   });
 }
 function readFields(bo) {
-  return extensionValues(bo, "activiti:Field", "camunda:Field").map(fieldDetails);
+  return deepFindExtensions(bo, "activiti:Field", "camunda:Field").map(fieldDetails);
 }
 function readMappings(bo) {
   return [
-    ...extensionValues(bo, "activiti:In", "camunda:In").map(item => ({
+    ...deepFindExtensions(bo, "activiti:In", "camunda:In").map(item => ({
       dir: "In",
       source: readNamedValue(item, "source", "sourceExpression") || "—",
       target: readNamedValue(item, "target", "targetExpression") || "—"
     })),
-    ...extensionValues(bo, "activiti:Out", "camunda:Out").map(item => ({
+    ...deepFindExtensions(bo, "activiti:Out", "camunda:Out").map(item => ({
       dir: "Out",
       source: readNamedValue(item, "source", "sourceExpression") || "—",
       target: readNamedValue(item, "target", "targetExpression") || "—"
     }))
   ];
+}
+function readInputOutputParameters(bo) {
+  return deepFindExtensions(bo, "camunda:InputOutput", "activiti:InputOutput").flatMap(io => [
+    ...asArray(io.inputParameters).map(param => ({
+      dir: "Input",
+      name: readNamedValue(param, "name") || "Unnamed input",
+      value: expressionBody(param.value) || readNamedValue(param, "value") || param.textContent || "—"
+    })),
+    ...asArray(io.outputParameters).map(param => ({
+      dir: "Output",
+      name: readNamedValue(param, "name") || "Unnamed output",
+      value: expressionBody(param.value) || readNamedValue(param, "value") || param.textContent || "—"
+    }))
+  ]);
+}
+function readProperties(bo) {
+  return deepFindExtensions(bo, "camunda:Properties", "activiti:Properties").flatMap(group =>
+    asArray(group.values).map(item => ({
+      name: readNamedValue(item, "name", "id") || "Unnamed property",
+      value: readNamedValue(item, "value") || expressionBody(item.value) || "—"
+    }))
+  );
 }
 function modelPropertyRows(bo) {
   const skip = new Set(["$type", "id", "name", "$parent", "$attrs", "documentation", "extensionElements", "eventDefinitions", "incoming", "outgoing", "sourceRef", "targetRef", "rootElements", "flowElements", "laneSets", "artifacts"]);
@@ -270,6 +311,8 @@ function renderProps(element = activeElement) {
   const taskListeners = readListeners(businessObject, "task");
   const injectedFields = readFields(businessObject);
   const mappings = readMappings(businessObject);
+  const ioParameters = readInputOutputParameters(businessObject);
+  const properties = readProperties(businessObject);
   const sections = [
     section("General", `<div class="prop-group">${[
       propRow("Type", activeElement.type?.replace("bpmn:", "") || businessObject.$type?.replace("bpmn:", "") || "Unknown"),
@@ -300,6 +343,15 @@ function renderProps(element = activeElement) {
     propRow("String value", field.stringValue),
     propRow("Expression", field.expression)
   ])).join("")}</div>`));
+  if (ioParameters.length) sections.push(section("Input / Output Parameters", `<div class="prop-inline-list">${ioParameters.map((param, index) => propCard(`${param.dir} parameter ${index + 1}`, [
+    propRow("Direction", param.dir),
+    propRow("Name", param.name),
+    propRow("Value", param.value)
+  ], param.dir)).join("")}</div>`));
+  if (properties.length) sections.push(section("Properties", `<div class="prop-inline-list">${properties.map(property => propCard(property.name, [
+    propRow("Name", property.name),
+    propRow("Value", property.value)
+  ])).join("")}</div>`));
   if (mappings.length) sections.push(section("Variable Mappings", `<div class="prop-inline-list">${mappings.map((mapping, index) => propCard(`${mapping.dir} mapping ${index + 1}`, [
     propRow("Direction", mapping.dir),
     propRow("Source", mapping.source),
@@ -315,6 +367,8 @@ function setBranchesOpen(open) {
   el.libraryGrid.classList.toggle("branches-collapsed", !branchesOpen);
   el.toggleBranches.classList.toggle("primary", branchesOpen);
   el.toggleBranches.classList.toggle("subtle", !branchesOpen);
+  el.toggleBranchesToolbar.classList.toggle("primary", branchesOpen);
+  el.toggleBranchesToolbar.classList.toggle("subtle", !branchesOpen);
 }
 function setFilesOpen(open) {
   filesOpen = open;
@@ -474,6 +528,7 @@ function wire() {
   el.signOut.onclick = () => signOut(auth);
   el.unlock.onclick = unlock;
   el.toggleBranches.onclick = () => setBranchesOpen(!branchesOpen);
+  el.toggleBranchesToolbar.onclick = () => setBranchesOpen(!branchesOpen);
   el.toggleFiles.onclick = () => setFilesOpen(!filesOpen);
   el.toggleProps.onclick = () => setPropsOpen(!propsOpen);
   el.zoomIn.onclick = () => adjustZoom(1.2);
