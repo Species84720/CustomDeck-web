@@ -9,7 +9,8 @@ const el = {
   signIn: $("google-sign-in"), signOut: $("sign-out"), userLabel: $("user-label"), welcome: $("welcome-label"),
   vaultStatus: $("vault-status"), password: $("vault-password"), unlock: $("unlock"), branchSearch: $("branch-search"),
   branchList: $("branch-list"), branchTitle: $("branch-title"), fileCount: $("file-count"), fileSearch: $("file-search"),
-  fileList: $("file-list"), viewerStatus: $("viewer-status"), canvas: $("canvas"), diagramHost: $("diagram-host"), canvasEmpty: $("canvas-empty"), uploadDialog: $("upload-dialog"),
+  fileList: $("file-list"), viewerStatus: $("viewer-status"), canvas: $("canvas"), diagramHost: $("diagram-host"), canvasEmpty: $("canvas-empty"),
+  toggleProps: $("toggle-props"), propsPanel: $("props-panel"), propsContent: $("props-content"), uploadDialog: $("upload-dialog"),
   uploadOpen: null, uploadForm: $("upload-form"), uploadBranch: $("upload-branch"), uploadFiles: $("upload-files"),
   uploadCancel: $("upload-cancel"), uploadStatus: $("upload-status")
 };
@@ -17,6 +18,8 @@ const el = {
 let auth, db, user, branches = [], activeBranch = null, viewer;
 let vaultPassword = "";
 let activeFileId = null;
+let activeElement = null;
+let propsOpen = true;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const MAX_FILE_BYTES = 900000;
@@ -48,6 +51,18 @@ async function open(key, payload) {
 function branchRef(branchId) { return doc(db, "users", user.uid, "bpmnVault", branchId); }
 function fileCollection(branchId) { return collection(db, "users", user.uid, "bpmnVault", branchId, "files"); }
 function isBpmn(file) { return /\.bpmn(?:20\.xml)?$/i.test(file.name); }
+function escapeHtml(value) {
+  return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
+}
+function fileNameFromPath(path) {
+  const parts = String(path).split("/");
+  return parts[parts.length - 1] || path;
+}
+function fileDirFromPath(path) {
+  const parts = String(path).split("/");
+  parts.pop();
+  return parts.join("/") || "Root folder";
+}
 function showCanvasMessage(message, error = false) {
   el.diagramHost.hidden = true;
   el.canvasEmpty.textContent = message;
@@ -58,6 +73,38 @@ function showDiagram() {
   el.canvasEmpty.hidden = true;
   el.canvasEmpty.classList.remove("error");
   el.diagramHost.hidden = false;
+}
+function renderProps(element = activeElement) {
+  activeElement = element || null;
+  if (!activeElement) {
+    el.propsContent.innerHTML = '<div class="empty small-empty">Open a BPMN file and click an element to inspect it.</div>';
+    return;
+  }
+  const businessObject = activeElement.businessObject || {};
+  const docs = (businessObject.documentation || []).map(item => item.text).filter(Boolean).join("\n\n");
+  const eventTypes = (businessObject.eventDefinitions || []).map(definition => definition.$type?.replace("bpmn:", "")).filter(Boolean).join(", ");
+  const rows = [
+    ["Type", activeElement.type?.replace("bpmn:", "") || businessObject.$type?.replace("bpmn:", "") || "Unknown"],
+    ["ID", businessObject.id || activeElement.id || "Unknown"],
+    ["Name", businessObject.name || "—"],
+    ["Incoming", Array.isArray(activeElement.incoming) ? activeElement.incoming.length : 0],
+    ["Outgoing", Array.isArray(activeElement.outgoing) ? activeElement.outgoing.length : 0]
+  ];
+  if (businessObject.$parent?.id) rows.push(["Parent", businessObject.$parent.id]);
+  if (eventTypes) rows.push(["Events", eventTypes]);
+  if (docs) rows.push(["Documentation", docs]);
+  el.propsContent.innerHTML = `<div class="prop-group">${rows.map(([label, value]) => `<div class="prop-row"><div class="prop-label">${escapeHtml(label)}</div><div class="prop-value">${escapeHtml(value)}</div></div>`).join("")}</div>`;
+}
+function setPropsOpen(open) {
+  propsOpen = open;
+  el.propsPanel.classList.toggle("hidden", !propsOpen);
+  el.toggleProps.classList.toggle("primary", propsOpen);
+  el.toggleProps.classList.toggle("subtle", !propsOpen);
+}
+function bindViewerEvents() {
+  const eventBus = viewer.get("eventBus");
+  eventBus.on("element.click", event => renderProps(event.element));
+  eventBus.on("canvas.click", () => renderProps(null));
 }
 
 async function signIn() {
@@ -113,6 +160,7 @@ async function selectBranch(branchId) {
   el.fileCount.textContent = `${activeBranch.files.length} file${activeBranch.files.length === 1 ? "" : "s"}`;
   renderFiles();
   showCanvasMessage(activeBranch.files.length ? "Select a BPMN file to view it." : "This branch has no BPMN files.");
+  renderProps(null);
   el.viewerStatus.textContent = "";
 }
 function renderFiles() {
@@ -121,7 +169,7 @@ function renderFiles() {
   (activeBranch?.files || []).filter(file => file.path.toLowerCase().includes(term)).forEach(file => {
     const button = document.createElement("button");
     button.className = "file-item" + (activeFileId === file.id ? " active" : "");
-    button.textContent = file.path;
+    button.innerHTML = `<span class="file-name">${escapeHtml(fileNameFromPath(file.path))}</span><span class="file-path">${escapeHtml(fileDirFromPath(file.path))}</span>`;
     button.onclick = () => viewFile(file);
     el.fileList.appendChild(button);
   });
@@ -133,9 +181,13 @@ async function viewFile(file) {
   el.viewerStatus.textContent = `Viewing ${file.path}`;
   try {
     showDiagram();
-    if (!viewer) viewer = new BpmnJS({ container: el.diagramHost });
+    if (!viewer) {
+      viewer = new BpmnJS({ container: el.diagramHost });
+      bindViewerEvents();
+    }
     await viewer.importXML(file.xml);
     viewer.get("canvas").zoom("fit-viewport");
+    renderProps(null);
   } catch (error) { showCanvasMessage(`Could not display this BPMN: ${String(error.message || error)}`, true); }
 }
 async function uploadBranch(event) {
@@ -184,12 +236,15 @@ function wire() {
   el.signIn.onclick = signIn;
   el.signOut.onclick = () => signOut(auth);
   el.unlock.onclick = unlock;
+  el.toggleProps.onclick = () => setPropsOpen(!propsOpen);
   el.password.onkeydown = event => { if (event.key === "Enter") unlock(); };
   el.branchSearch.oninput = renderBranches;
   el.fileSearch.oninput = renderFiles;
 }
 function boot() {
   wire();
+  setPropsOpen(true);
+  renderProps(null);
   if (!cfg || cfg.apiKey === "REPLACE_ME") { el.authStatus.textContent = "Copy config.example.js to config.js and add your Firebase web configuration."; el.signIn.disabled = true; return; }
   const app = initializeApp(cfg);
   auth = getAuth(app); db = getFirestore(app);
