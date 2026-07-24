@@ -192,6 +192,76 @@ function readProperties(bo) {
     }))
   );
 }
+function definitionsRoot(bo) {
+  let current = bo;
+  while (current?.$parent) current = current.$parent;
+  return current?.rootElements ? current : null;
+}
+function readDefinitionsByType(bo, ...types) {
+  const defs = definitionsRoot(bo);
+  const wanted = new Set(types.map(type => nsKey(type)));
+  return asArray(defs?.rootElements).filter(item => wanted.has(nsKey(item?.$type)));
+}
+function readSignalMessageDefinitions(bo) {
+  return [
+    ...readDefinitionsByType(bo, "bpmn:Signal").map(item => ({ type: "Signal", id: item.id || "—", name: item.name || "—" })),
+    ...readDefinitionsByType(bo, "bpmn:Message").map(item => ({ type: "Message", id: item.id || "—", name: item.name || "—" }))
+  ];
+}
+function sanitizeForDisplay(value, depth = 0, seen = new WeakSet()) {
+  if (value == null) return value;
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
+  const expr = expressionBody(value);
+  if (expr) return expr;
+  if (typeof value !== "object") return String(value);
+  if (seen.has(value)) return "[Circular]";
+  if (depth > 4) return value.id || value.name || value.$type || "[Object]";
+  seen.add(value);
+  if (Array.isArray(value)) return value.map(item => sanitizeForDisplay(item, depth + 1, seen));
+  const out = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (key === "$parent" || key === "parent" || key === "labels" || key === "incoming" || key === "outgoing" || key === "sourceRef" || key === "targetRef") continue;
+    if (key.startsWith("$") && key !== "$type" && key !== "$attrs") continue;
+    out[key] = sanitizeForDisplay(child, depth + 1, seen);
+  }
+  return out;
+}
+function rawBlock(title, value) {
+  const sanitized = sanitizeForDisplay(value);
+  const text = JSON.stringify(sanitized, null, 2);
+  if (!text || text === "{}" || text === "[]") return "";
+  return section(title, `<div class="prop-group"><div class="prop-row"><div class="prop-value"><pre class="prop-pre">${escapeHtml(text)}</pre></div></div></div>`);
+}
+function patchDiagramXml(xml) {
+  if (!xml || !xml.includes("BPMNShape")) return xml;
+  try {
+    const doc = new DOMParser().parseFromString(xml, "application/xml");
+    const shapes = doc.querySelectorAll("[bpmnElement]");
+    let modified = false;
+    for (const shape of shapes) {
+      if (!shape.nodeName.includes("BPMNShape")) continue;
+      const ref = shape.getAttribute("bpmnElement");
+      if (!ref) continue;
+      let target = null;
+      const allElements = doc.getElementsByTagName("*");
+      for (let index = 0; index < allElements.length; index += 1) {
+        if (allElements[index].getAttribute("id") === ref) {
+          target = allElements[index];
+          break;
+        }
+      }
+      if (!target) continue;
+      const nodeName = target.nodeName || "";
+      if ((nodeName.includes("SubProcess") || nodeName.includes("Transaction")) && shape.getAttribute("isExpanded") !== "true") {
+        shape.setAttribute("isExpanded", "true");
+        modified = true;
+      }
+    }
+    return modified ? new XMLSerializer().serializeToString(doc) : xml;
+  } catch (_) {
+    return xml;
+  }
+}
 function modelPropertyRows(bo) {
   const skip = new Set(["$type", "id", "name", "$parent", "$attrs", "documentation", "extensionElements", "eventDefinitions", "incoming", "outgoing", "sourceRef", "targetRef", "rootElements", "flowElements", "laneSets", "artifacts"]);
   const rows = [];
@@ -313,6 +383,7 @@ function renderProps(element = activeElement) {
   const mappings = readMappings(businessObject);
   const ioParameters = readInputOutputParameters(businessObject);
   const properties = readProperties(businessObject);
+  const signalMessageDefinitions = businessObject.$type === "bpmn:Process" ? readSignalMessageDefinitions(businessObject) : [];
   const sections = [
     section("General", `<div class="prop-group">${[
       propRow("Type", activeElement.type?.replace("bpmn:", "") || businessObject.$type?.replace("bpmn:", "") || "Unknown"),
@@ -327,6 +398,11 @@ function renderProps(element = activeElement) {
   if (implementationRows.length) sections.push(section("Implementation", `<div class="prop-group">${implementationRows.join("")}</div>`));
   const eventCards = eventDefinitionRows(businessObject);
   if (eventCards.length) sections.push(section("Event Definitions", `<div class="prop-inline-list">${eventCards.join("")}</div>`));
+  if (signalMessageDefinitions.length) sections.push(section("Signal / Message Definitions", `<div class="prop-inline-list">${signalMessageDefinitions.map(item => propCard(`${item.type}: ${item.name !== "—" ? item.name : item.id}`, [
+    propRow("Type", item.type),
+    propRow("ID", item.id),
+    propRow("Name", item.name)
+  ], item.type)).join("")}</div>`));
   if (executionListeners.length) sections.push(section("Execution Listeners", `<div class="prop-inline-list">${executionListeners.map((listener, index) => propCard(`Listener ${index + 1}`, [
     propRow("Event", listener.event),
     propRow("Type", listener.type),
@@ -359,6 +435,10 @@ function renderProps(element = activeElement) {
   ], mapping.dir)).join("")}</div>`));
   const modelRows = modelPropertyRows(businessObject);
   if (modelRows.length) sections.push(section("All Model Properties", `<div class="prop-group">${modelRows.join("")}</div>`));
+  const rawExtensions = rawBlock("Raw Extension Data", businessObject.extensionElements);
+  if (rawExtensions) sections.push(rawExtensions);
+  const rawEvents = rawBlock("Raw Event Data", businessObject.eventDefinitions);
+  if (rawEvents) sections.push(rawEvents);
   el.propsContent.innerHTML = sections.join("");
 }
 function setBranchesOpen(open) {
@@ -472,11 +552,12 @@ async function viewFile(file) {
   el.viewerStatus.textContent = `Viewing ${file.path}`;
   try {
     showDiagram();
+    const xml = patchDiagramXml(file.xml);
     if (!viewer) {
       viewer = new BpmnJS({ container: el.diagramHost });
       bindViewerEvents();
     }
-    await viewer.importXML(file.xml);
+    await viewer.importXML(xml);
     fitDiagram();
     renderProps(null);
   } catch (error) { showCanvasMessage(`Could not display this BPMN: ${String(error.message || error)}`, true); }
