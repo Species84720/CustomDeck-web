@@ -1,5 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
-import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithRedirect, signOut } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 import { getFirestore, collection, doc, deleteDoc, getDoc, getDocs, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
 const cfg = window.BPMN_VAULT_CONFIG?.firebase;
@@ -33,6 +33,15 @@ const MAX_FILE_BYTES = 900000;
 function status(message, error = false) {
   el.vaultStatus.textContent = message;
   el.vaultStatus.classList.toggle("error", error);
+}
+function friendlyAuthError(error) {
+  const code = String(error?.code || "");
+  if (code.includes("popup-blocked")) return "Popup was blocked by the browser. Allow popups and try again.";
+  if (code.includes("popup-closed-by-user")) return "The Google sign-in popup was closed before completion.";
+  if (code.includes("unauthorized-domain")) return "This site is not listed in Firebase Authentication allowed domains.";
+  if (code.includes("operation-not-allowed")) return "Google sign-in is not enabled in Firebase Authentication.";
+  if (code.includes("invalid-api-key")) return "The Firebase API key in config.js is invalid.";
+  return String(error?.message || error || "Google sign-in failed.");
 }
 function bytesToBase64(bytes) { let binary = ""; bytes.forEach(byte => binary += String.fromCharCode(byte)); return btoa(binary); }
 function base64ToBytes(value) { const binary = atob(value); return Uint8Array.from(binary, char => char.charCodeAt(0)); }
@@ -529,8 +538,12 @@ function bindViewerEvents() {
 
 async function signIn() {
   if (!auth) return;
-  try { await signInWithRedirect(auth, new GoogleAuthProvider()); }
-  catch (error) { el.authStatus.textContent = error.message || "Google sign-in failed."; }
+  try {
+    el.authStatus.textContent = "";
+    await signInWithPopup(auth, new GoogleAuthProvider());
+  } catch (error) {
+    el.authStatus.textContent = friendlyAuthError(error);
+  }
 }
 async function loadBranches() {
   const snapshot = await getDocs(collection(db, "users", user.uid, "bpmnVault"));
