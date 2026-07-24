@@ -9,8 +9,10 @@ const el = {
   signIn: $("google-sign-in"), signOut: $("sign-out"), userLabel: $("user-label"), welcome: $("welcome-label"),
   vaultStatus: $("vault-status"), password: $("vault-password"), unlock: $("unlock"), branchSearch: $("branch-search"),
   branchList: $("branch-list"), branchTitle: $("branch-title"), fileCount: $("file-count"), fileSearch: $("file-search"),
+  branchSidebar: $("branch-sidebar"), libraryGrid: $("library"), contentGrid: $("content-grid"), filePane: $("file-pane"),
   fileList: $("file-list"), viewerStatus: $("viewer-status"), canvas: $("canvas"), diagramHost: $("diagram-host"), canvasEmpty: $("canvas-empty"),
-  toggleProps: $("toggle-props"), propsPanel: $("props-panel"), propsContent: $("props-content"), uploadDialog: $("upload-dialog"),
+  toggleBranches: $("toggle-branches"), toggleFiles: $("toggle-files"), toggleProps: $("toggle-props"),
+  zoomIn: $("zoom-in"), zoomOut: $("zoom-out"), zoomFit: $("zoom-fit"), propsPanel: $("props-panel"), propsContent: $("props-content"), uploadDialog: $("upload-dialog"),
   uploadOpen: null, uploadForm: $("upload-form"), uploadBranch: $("upload-branch"), uploadFiles: $("upload-files"),
   uploadCancel: $("upload-cancel"), uploadStatus: $("upload-status")
 };
@@ -19,7 +21,10 @@ let auth, db, user, branches = [], activeBranch = null, viewer;
 let vaultPassword = "";
 let activeFileId = null;
 let activeElement = null;
+let branchesOpen = true;
+let filesOpen = true;
 let propsOpen = true;
+let panState = null;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const MAX_FILE_BYTES = 900000;
@@ -63,6 +68,118 @@ function fileDirFromPath(path) {
   parts.pop();
   return parts.join("/") || "Root folder";
 }
+function asArray(value) { return Array.isArray(value) ? value : []; }
+function nsKey(name) { return String(name || "").split(":").pop(); }
+function readNamedValue(source, ...names) {
+  const wanted = names.flatMap(name => [name, nsKey(name)]).map(name => String(name));
+  for (const name of names) {
+    if (source?.[name] !== undefined && source[name] !== null && source[name] !== "") return source[name];
+  }
+  for (const [key, value] of Object.entries(source?.$attrs || {})) {
+    if (wanted.includes(key) || wanted.includes(nsKey(key))) return value;
+  }
+  return "";
+}
+function expressionBody(value) {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  if (typeof value.body === "string") return value.body;
+  if (typeof value.$body === "string") return value.$body;
+  if (typeof value.text === "string") return value.text;
+  return "";
+}
+function section(title, body) {
+  return `<section class="prop-section"><div class="prop-section-title">${escapeHtml(title)}</div>${body}</section>`;
+}
+function propRow(label, value) {
+  return `<div class="prop-row"><div class="prop-label">${escapeHtml(label)}</div><div class="prop-value">${escapeHtml(value)}</div></div>`;
+}
+function propCard(title, rows, badge = "") {
+  return `<article class="prop-card">${badge ? `<div class="prop-badge">${escapeHtml(badge)}</div>` : ""}<div class="prop-card-title">${escapeHtml(title)}</div><div class="prop-keyvals">${rows.join("")}</div></article>`;
+}
+function extensionValues(bo, ...types) {
+  const names = new Set(types.map(type => nsKey(type)));
+  return asArray(bo?.extensionElements?.values).filter(value => names.has(nsKey(value?.$type)));
+}
+function listenerImplementation(listener) {
+  const className = readNamedValue(listener, "class");
+  const delegateExpression = readNamedValue(listener, "delegateExpression");
+  const expression = readNamedValue(listener, "expression");
+  if (className) return { type: "Java class", value: className };
+  if (delegateExpression) return { type: "Delegate expression", value: delegateExpression };
+  if (expression) return { type: "Expression", value: expression };
+  return { type: "Implementation", value: "—" };
+}
+function listenerFields(listener) {
+  const directFields = asArray(listener?.fields);
+  const extFields = asArray(listener?.extensionElements?.values).filter(value => nsKey(value?.$type) === "Field");
+  return [...directFields, ...extFields];
+}
+function fieldDetails(field) {
+  return {
+    name: readNamedValue(field, "name") || "Unnamed field",
+    stringValue: readNamedValue(field, "stringValue", "string") || expressionBody(field?.string) || "—",
+    expression: readNamedValue(field, "expression") || expressionBody(field?.expression) || "—"
+  };
+}
+function readListeners(bo, kind) {
+  const types = kind === "task" ? ["activiti:TaskListener", "camunda:TaskListener"] : ["activiti:ExecutionListener", "camunda:ExecutionListener"];
+  return extensionValues(bo, ...types).map(listener => {
+    const impl = listenerImplementation(listener);
+    return {
+      event: readNamedValue(listener, "event") || "—",
+      type: impl.type,
+      value: impl.value,
+      fields: listenerFields(listener).map(fieldDetails)
+    };
+  });
+}
+function readFields(bo) {
+  return extensionValues(bo, "activiti:Field", "camunda:Field").map(fieldDetails);
+}
+function readMappings(bo) {
+  return [
+    ...extensionValues(bo, "activiti:In", "camunda:In").map(item => ({
+      dir: "In",
+      source: readNamedValue(item, "source", "sourceExpression") || "—",
+      target: readNamedValue(item, "target", "targetExpression") || "—"
+    })),
+    ...extensionValues(bo, "activiti:Out", "camunda:Out").map(item => ({
+      dir: "Out",
+      source: readNamedValue(item, "source", "sourceExpression") || "—",
+      target: readNamedValue(item, "target", "targetExpression") || "—"
+    }))
+  ];
+}
+function modelPropertyRows(bo) {
+  const skip = new Set(["$type", "id", "name", "$parent", "$attrs", "documentation", "extensionElements", "eventDefinitions", "incoming", "outgoing", "sourceRef", "targetRef", "rootElements", "flowElements", "laneSets", "artifacts"]);
+  const rows = [];
+  for (const [key, value] of Object.entries(bo || {})) {
+    if (skip.has(key) || key.startsWith("$")) continue;
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") rows.push([key, value]);
+    else {
+      const expr = expressionBody(value);
+      if (expr) rows.push([key, expr]);
+      else if (value && typeof value === "object" && typeof value.id === "string") rows.push([key, value.id]);
+    }
+  }
+  for (const [key, value] of Object.entries(bo?.$attrs || {})) {
+    if (value !== undefined && value !== null && value !== "") rows.push([key, value]);
+  }
+  return rows
+    .filter(([, value]) => value !== "")
+    .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+    .map(([key, value]) => propRow(key, value));
+}
+function eventDefinitionRows(bo) {
+  return asArray(bo?.eventDefinitions).map(definition => {
+    const rows = [propRow("Type", nsKey(definition?.$type) || "—")];
+    if (definition?.messageRef?.id) rows.push(propRow("Message ref", definition.messageRef.id));
+    if (definition?.signalRef?.id) rows.push(propRow("Signal ref", definition.signalRef.id));
+    if (expressionBody(definition?.condition)) rows.push(propRow("Condition", expressionBody(definition.condition)));
+    return propCard(nsKey(definition?.$type) || "Event definition", rows);
+  });
+}
 function showCanvasMessage(message, error = false) {
   el.diagramHost.hidden = true;
   el.canvasEmpty.textContent = message;
@@ -74,6 +191,42 @@ function showDiagram() {
   el.canvasEmpty.classList.remove("error");
   el.diagramHost.hidden = false;
 }
+function currentScale() {
+  try { return viewer?.get("canvas")?.viewbox()?.scale || 1; }
+  catch (_) { return 1; }
+}
+function setZoom(nextScale) {
+  if (!viewer) return;
+  const canvas = viewer.get("canvas");
+  const clamped = Math.min(4, Math.max(0.2, nextScale));
+  canvas.zoom(clamped);
+}
+function adjustZoom(factor) {
+  setZoom(currentScale() * factor);
+}
+function fitDiagram() {
+  if (!viewer) return;
+  viewer.get("canvas").zoom("fit-viewport");
+}
+function beginPan(event) {
+  if (!viewer || event.button !== 0) return;
+  if (event.target.closest(".djs-element")) return;
+  const canvas = viewer.get("canvas");
+  const viewbox = canvas.viewbox();
+  panState = { x: event.clientX, y: event.clientY, viewbox };
+  el.canvas.classList.add("is-panning");
+}
+function movePan(event) {
+  if (!panState || !viewer) return;
+  const canvas = viewer.get("canvas");
+  const dx = (event.clientX - panState.x) / panState.viewbox.scale;
+  const dy = (event.clientY - panState.y) / panState.viewbox.scale;
+  canvas.viewbox({ x: panState.viewbox.x - dx, y: panState.viewbox.y - dy, width: panState.viewbox.width, height: panState.viewbox.height });
+}
+function endPan() {
+  panState = null;
+  el.canvas.classList.remove("is-panning");
+}
 function renderProps(element = activeElement) {
   activeElement = element || null;
   if (!activeElement) {
@@ -81,23 +234,99 @@ function renderProps(element = activeElement) {
     return;
   }
   const businessObject = activeElement.businessObject || {};
-  const docs = (businessObject.documentation || []).map(item => item.text).filter(Boolean).join("\n\n");
-  const eventTypes = (businessObject.eventDefinitions || []).map(definition => definition.$type?.replace("bpmn:", "")).filter(Boolean).join(", ");
-  const rows = [
-    ["Type", activeElement.type?.replace("bpmn:", "") || businessObject.$type?.replace("bpmn:", "") || "Unknown"],
-    ["ID", businessObject.id || activeElement.id || "Unknown"],
-    ["Name", businessObject.name || "—"],
-    ["Incoming", Array.isArray(activeElement.incoming) ? activeElement.incoming.length : 0],
-    ["Outgoing", Array.isArray(activeElement.outgoing) ? activeElement.outgoing.length : 0]
+  const docs = asArray(businessObject.documentation).map(item => item?.text).filter(Boolean).join("\n\n");
+  const implementationRows = [];
+  const className = readNamedValue(businessObject, "class");
+  const delegateExpression = readNamedValue(businessObject, "delegateExpression");
+  const expression = readNamedValue(businessObject, "expression");
+  if (className) implementationRows.push(propRow("Java class", className));
+  if (delegateExpression) implementationRows.push(propRow("Delegate expression", delegateExpression));
+  if (expression) implementationRows.push(propRow("Expression", expression));
+  const knownRows = [
+    ["Form key", readNamedValue(businessObject, "formKey")],
+    ["Initiator", readNamedValue(businessObject, "initiator")],
+    ["Assignee", readNamedValue(businessObject, "assignee")],
+    ["Candidate users", readNamedValue(businessObject, "candidateUsers")],
+    ["Candidate groups", readNamedValue(businessObject, "candidateGroups")],
+    ["Priority", readNamedValue(businessObject, "priority")],
+    ["Due date", readNamedValue(businessObject, "dueDate")],
+    ["Called element", readNamedValue(businessObject, "calledElement")],
+    ["Result variable", readNamedValue(businessObject, "resultVariable")],
+    ["Script format", readNamedValue(businessObject, "scriptFormat")],
+    ["Script", readNamedValue(businessObject, "script") || expressionBody(businessObject.script)],
+    ["Condition expression", expressionBody(businessObject.conditionExpression)],
+    ["Collection", readNamedValue(businessObject, "collection")],
+    ["Element variable", readNamedValue(businessObject, "elementVariable")],
+    ["Async before", String(!!readNamedValue(businessObject, "asyncBefore", "async"))],
+    ["Async after", String(!!readNamedValue(businessObject, "asyncAfter"))],
+    ["Exclusive", String(!!readNamedValue(businessObject, "exclusive"))],
+    ["Cancel activity", String(!!readNamedValue(businessObject, "cancelActivity"))],
+    ["Triggered by event", String(!!readNamedValue(businessObject, "triggeredByEvent"))],
+    ["Auto store variables", String(!!readNamedValue(businessObject, "autoStoreVariables"))]
+  ].filter(([, value]) => value && value !== "false");
+  implementationRows.push(...knownRows.map(([label, value]) => propRow(label, value)));
+
+  const executionListeners = readListeners(businessObject, "execution");
+  const taskListeners = readListeners(businessObject, "task");
+  const injectedFields = readFields(businessObject);
+  const mappings = readMappings(businessObject);
+  const sections = [
+    section("General", `<div class="prop-group">${[
+      propRow("Type", activeElement.type?.replace("bpmn:", "") || businessObject.$type?.replace("bpmn:", "") || "Unknown"),
+      propRow("ID", businessObject.id || activeElement.id || "Unknown"),
+      propRow("Name", businessObject.name || "—"),
+      propRow("Parent", businessObject.$parent?.id || "—"),
+      propRow("Incoming", Array.isArray(activeElement.incoming) ? activeElement.incoming.length : 0),
+      propRow("Outgoing", Array.isArray(activeElement.outgoing) ? activeElement.outgoing.length : 0),
+      propRow("Documentation", docs || "—")
+    ].join("")}</div>`)
   ];
-  if (businessObject.$parent?.id) rows.push(["Parent", businessObject.$parent.id]);
-  if (eventTypes) rows.push(["Events", eventTypes]);
-  if (docs) rows.push(["Documentation", docs]);
-  el.propsContent.innerHTML = `<div class="prop-group">${rows.map(([label, value]) => `<div class="prop-row"><div class="prop-label">${escapeHtml(label)}</div><div class="prop-value">${escapeHtml(value)}</div></div>`).join("")}</div>`;
+  if (implementationRows.length) sections.push(section("Implementation", `<div class="prop-group">${implementationRows.join("")}</div>`));
+  const eventCards = eventDefinitionRows(businessObject);
+  if (eventCards.length) sections.push(section("Event Definitions", `<div class="prop-inline-list">${eventCards.join("")}</div>`));
+  if (executionListeners.length) sections.push(section("Execution Listeners", `<div class="prop-inline-list">${executionListeners.map((listener, index) => propCard(`Listener ${index + 1}`, [
+    propRow("Event", listener.event),
+    propRow("Type", listener.type),
+    propRow("Implementation", listener.value),
+    propRow("Field injections", listener.fields.length)
+  ], listener.event) + (listener.fields.length ? `<div class="prop-sublist">${listener.fields.map(field => `<div class="prop-subitem">${propRow("Name", field.name)}${propRow("String value", field.stringValue)}${propRow("Expression", field.expression)}</div>`).join("")}</div>` : "")).join("")}</div>`));
+  if (taskListeners.length) sections.push(section("Task Listeners", `<div class="prop-inline-list">${taskListeners.map((listener, index) => propCard(`Task listener ${index + 1}`, [
+    propRow("Event", listener.event),
+    propRow("Type", listener.type),
+    propRow("Implementation", listener.value),
+    propRow("Field injections", listener.fields.length)
+  ], listener.event) + (listener.fields.length ? `<div class="prop-sublist">${listener.fields.map(field => `<div class="prop-subitem">${propRow("Name", field.name)}${propRow("String value", field.stringValue)}${propRow("Expression", field.expression)}</div>`).join("")}</div>` : "")).join("")}</div>`));
+  if (injectedFields.length) sections.push(section("Field Injections", `<div class="prop-inline-list">${injectedFields.map(field => propCard(field.name, [
+    propRow("String value", field.stringValue),
+    propRow("Expression", field.expression)
+  ])).join("")}</div>`));
+  if (mappings.length) sections.push(section("Variable Mappings", `<div class="prop-inline-list">${mappings.map((mapping, index) => propCard(`${mapping.dir} mapping ${index + 1}`, [
+    propRow("Direction", mapping.dir),
+    propRow("Source", mapping.source),
+    propRow("Target", mapping.target)
+  ], mapping.dir)).join("")}</div>`));
+  const modelRows = modelPropertyRows(businessObject);
+  if (modelRows.length) sections.push(section("All Model Properties", `<div class="prop-group">${modelRows.join("")}</div>`));
+  el.propsContent.innerHTML = sections.join("");
+}
+function setBranchesOpen(open) {
+  branchesOpen = open;
+  el.branchSidebar.hidden = !branchesOpen;
+  el.libraryGrid.classList.toggle("branches-collapsed", !branchesOpen);
+  el.toggleBranches.classList.toggle("primary", branchesOpen);
+  el.toggleBranches.classList.toggle("subtle", !branchesOpen);
+}
+function setFilesOpen(open) {
+  filesOpen = open;
+  el.filePane.hidden = !filesOpen;
+  el.contentGrid.classList.toggle("files-collapsed", !filesOpen);
+  el.toggleFiles.classList.toggle("primary", filesOpen);
+  el.toggleFiles.classList.toggle("subtle", !filesOpen);
 }
 function setPropsOpen(open) {
   propsOpen = open;
   el.propsPanel.classList.toggle("hidden", !propsOpen);
+  el.contentGrid.classList.toggle("props-collapsed", !propsOpen);
   el.toggleProps.classList.toggle("primary", propsOpen);
   el.toggleProps.classList.toggle("subtle", !propsOpen);
 }
@@ -105,6 +334,14 @@ function bindViewerEvents() {
   const eventBus = viewer.get("eventBus");
   eventBus.on("element.click", event => renderProps(event.element));
   eventBus.on("canvas.click", () => renderProps(null));
+  el.canvas.addEventListener("pointerdown", beginPan);
+  window.addEventListener("pointermove", movePan);
+  window.addEventListener("pointerup", endPan);
+  el.canvas.addEventListener("wheel", event => {
+    if (!viewer || !event.ctrlKey) return;
+    event.preventDefault();
+    adjustZoom(event.deltaY < 0 ? 1.1 : 1 / 1.1);
+  }, { passive: false });
 }
 
 async function signIn() {
@@ -186,7 +423,7 @@ async function viewFile(file) {
       bindViewerEvents();
     }
     await viewer.importXML(file.xml);
-    viewer.get("canvas").zoom("fit-viewport");
+    fitDiagram();
     renderProps(null);
   } catch (error) { showCanvasMessage(`Could not display this BPMN: ${String(error.message || error)}`, true); }
 }
@@ -236,13 +473,20 @@ function wire() {
   el.signIn.onclick = signIn;
   el.signOut.onclick = () => signOut(auth);
   el.unlock.onclick = unlock;
+  el.toggleBranches.onclick = () => setBranchesOpen(!branchesOpen);
+  el.toggleFiles.onclick = () => setFilesOpen(!filesOpen);
   el.toggleProps.onclick = () => setPropsOpen(!propsOpen);
+  el.zoomIn.onclick = () => adjustZoom(1.2);
+  el.zoomOut.onclick = () => adjustZoom(1 / 1.2);
+  el.zoomFit.onclick = fitDiagram;
   el.password.onkeydown = event => { if (event.key === "Enter") unlock(); };
   el.branchSearch.oninput = renderBranches;
   el.fileSearch.oninput = renderFiles;
 }
 function boot() {
   wire();
+  setBranchesOpen(true);
+  setFilesOpen(true);
   setPropsOpen(true);
   renderProps(null);
   if (!cfg || cfg.apiKey === "REPLACE_ME") { el.authStatus.textContent = "Copy config.example.js to config.js and add your Firebase web configuration."; el.signIn.disabled = true; return; }
