@@ -796,6 +796,7 @@ function wireTodoEvents() {
   list.addEventListener("click", event => {
     const control = event.target.closest("[data-todo-action]");
     if (!control) return;
+    if (control.dataset.todoAction === "toggle") return;
     const id = control.dataset.todoId;
     if (control.dataset.todoAction === "edit") {
       const todo = todos.find(item => item.id === id);
