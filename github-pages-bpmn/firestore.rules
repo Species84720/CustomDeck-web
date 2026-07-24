@@ -1,10 +1,80 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isLegacyOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function branchData() {
+      return resource.data;
+    }
+
+    function branchExists() {
+      return resource != null;
+    }
+
+    function nextBranchData() {
+      return request.resource.data;
+    }
+
+    function requesterEmail() {
+      return signedIn() && request.auth.token.email != null
+        ? request.auth.token.email.lower()
+        : "";
+    }
+
+    function isSharedOwner(data) {
+      return signedIn()
+        && data.ownerUid is string
+        && data.ownerUid == request.auth.uid;
+    }
+
+    function isSharedMember(data) {
+      return signedIn()
+        && requesterEmail() != ""
+        && data.memberEmails is list
+        && requesterEmail() in data.memberEmails;
+    }
+
+    function canAccessSharedBranch(data) {
+      return isSharedOwner(data) || isSharedMember(data);
+    }
+
+    function sharedBranchCreateIsValid() {
+      return signedIn()
+        && nextBranchData().ownerUid == request.auth.uid
+        && nextBranchData().ownerEmail is string
+        && nextBranchData().memberEmails is list
+        && (requesterEmail() == "" || requesterEmail() in nextBranchData().memberEmails);
+    }
+
+    function sharedBranchUpdateIsValid() {
+      return signedIn()
+        && canAccessSharedBranch(branchData())
+        && nextBranchData().ownerUid == branchData().ownerUid
+        && nextBranchData().ownerEmail == branchData().ownerEmail;
+    }
+
     match /users/{uid}/bpmnVault/{branchId} {
-      allow read, write: if request.auth != null && request.auth.uid == uid;
+      allow read, write: if isLegacyOwner(uid);
       match /files/{fileId} {
-        allow read, write: if request.auth != null && request.auth.uid == uid;
+        allow read, write: if isLegacyOwner(uid);
+      }
+    }
+
+    match /bpmnVaultBranches/{branchId} {
+      allow list: if signedIn();
+      allow get: if signedIn() && (!branchExists() || canAccessSharedBranch(branchData()));
+      allow create: if sharedBranchCreateIsValid();
+      allow update: if sharedBranchUpdateIsValid();
+      allow delete: if isSharedOwner(branchData());
+
+      match /files/{fileId} {
+        allow read, write: if canAccessSharedBranch(get(/databases/$(database)/documents/bpmnVaultBranches/$(branchId)).data);
       }
     }
   }
