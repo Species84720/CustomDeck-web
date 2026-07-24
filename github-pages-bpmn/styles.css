@@ -1,5 +1,6 @@
 :root { --bg:#0d1220; --panel:#151d2e; --panel2:#1b263b; --border:#2b3955; --text:#e8eefb; --muted:#96a3bb; --accent:#5b8cff; --danger:#ff7676; }
 * { box-sizing:border-box; }
+[hidden] { display:none !important; }
 body { margin:0; min-height:100vh; background:radial-gradient(circle at top,#1a2740 0,#0d1220 42rem); color:var(--text); font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif; }
 button,input { font:inherit; }
 .shell { max-width:1500px; margin:auto; padding:22px; }
