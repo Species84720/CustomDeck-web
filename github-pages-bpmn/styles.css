@@ -22,11 +22,13 @@ input:focus { border-color:var(--accent); } .unlock-actions input { width:230px;
 .library-grid { display:grid; grid-template-columns:280px minmax(0,1fr); gap:16px; min-height:650px; }
 .sidebar,.viewer-panel { padding:15px; min-width:0; } .sidebar { display:flex; flex-direction:column; gap:12px; }
 .section-heading { justify-content:space-between; gap:12px; } .branch-list,.file-list { display:flex; flex-direction:column; gap:5px; overflow:auto; }
-.branch-list { flex:1; } .branch-item,.file-item { text-align:left; border:1px solid transparent; background:transparent; color:var(--text); border-radius:7px; padding:9px 10px; cursor:pointer; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.branch-list { flex:1; } .branch-item,.file-item { text-align:left; border:1px solid transparent; background:transparent; color:var(--text); border-radius:7px; padding:9px 10px; cursor:pointer; line-height:1.35; font-size:13px; }
+.branch-item { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.file-item { min-height:42px; white-space:normal; overflow-wrap:anywhere; word-break:break-word; }
 .branch-item:hover,.file-item:hover { background:var(--panel2); } .branch-item.active,.file-item.active { background:#284b9a; border-color:var(--accent); }
 .pill { color:var(--muted); font-size:12px; } .file-toolbar { gap:10px; margin:14px 0 10px; } .file-toolbar .search { max-width:360px; }
 .content-grid { display:grid; grid-template-columns:280px minmax(0,1fr); gap:12px; height:560px; } .file-list { border-right:1px solid var(--border); padding-right:10px; }
-.canvas { min-width:0; min-height:300px; background:#f5f7fb; border-radius:8px; overflow:hidden; } .canvas .djs-container { background:transparent!important; }
+.canvas { min-width:0; min-height:300px; background:#f5f7fb; border-radius:8px; overflow:hidden; position:relative; } .diagram-host,.canvas .djs-container { width:100%; height:100%; } .canvas .djs-container { background:transparent!important; }
 .empty { display:grid; place-items:center; height:100%; padding:20px; color:#71809a; text-align:center; } .small-empty { height:auto; font-size:12px; } .error { color:var(--danger); }
 dialog { width:min(560px,92vw); border:1px solid var(--border); border-radius:12px; background:var(--panel); color:var(--text); padding:22px; box-shadow:0 20px 70px #000a; }
 dialog::backdrop { background:#050914bb; } dialog form { display:grid; gap:12px; } dialog label { display:grid; gap:5px; color:var(--muted); font-size:12px; } dialog menu { margin:6px 0 0; padding:0; display:flex; justify-content:flex-end; gap:8px; }

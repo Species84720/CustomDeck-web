@@ -9,13 +9,14 @@ const el = {
   signIn: $("google-sign-in"), signOut: $("sign-out"), userLabel: $("user-label"), welcome: $("welcome-label"),
   vaultStatus: $("vault-status"), password: $("vault-password"), unlock: $("unlock"), branchSearch: $("branch-search"),
   branchList: $("branch-list"), branchTitle: $("branch-title"), fileCount: $("file-count"), fileSearch: $("file-search"),
-  fileList: $("file-list"), viewerStatus: $("viewer-status"), canvas: $("canvas"), uploadDialog: $("upload-dialog"),
+  fileList: $("file-list"), viewerStatus: $("viewer-status"), canvas: $("canvas"), diagramHost: $("diagram-host"), canvasEmpty: $("canvas-empty"), uploadDialog: $("upload-dialog"),
   uploadOpen: null, uploadForm: $("upload-form"), uploadBranch: $("upload-branch"), uploadFiles: $("upload-files"),
   uploadCancel: $("upload-cancel"), uploadStatus: $("upload-status")
 };
 
 let auth, db, user, branches = [], activeBranch = null, viewer;
 let vaultPassword = "";
+let activeFileId = null;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const MAX_FILE_BYTES = 900000;
@@ -47,6 +48,17 @@ async function open(key, payload) {
 function branchRef(branchId) { return doc(db, "users", user.uid, "bpmnVault", branchId); }
 function fileCollection(branchId) { return collection(db, "users", user.uid, "bpmnVault", branchId, "files"); }
 function isBpmn(file) { return /\.bpmn(?:20\.xml)?$/i.test(file.name); }
+function showCanvasMessage(message, error = false) {
+  el.diagramHost.hidden = true;
+  el.canvasEmpty.textContent = message;
+  el.canvasEmpty.hidden = false;
+  el.canvasEmpty.classList.toggle("error", error);
+}
+function showDiagram() {
+  el.canvasEmpty.hidden = true;
+  el.canvasEmpty.classList.remove("error");
+  el.diagramHost.hidden = false;
+}
 
 async function signIn() {
   if (!auth) return;
@@ -85,6 +97,7 @@ function renderBranches() {
 async function selectBranch(branchId) {
   activeBranch = branches.find(branch => branch.id === branchId) || null;
   if (!activeBranch) return;
+  activeFileId = null;
   renderBranches();
   el.branchTitle.textContent = activeBranch.name;
   el.viewerStatus.textContent = "Loading files...";
@@ -99,6 +112,7 @@ async function selectBranch(branchId) {
   activeBranch.files.sort((a, b) => a.path.localeCompare(b.path));
   el.fileCount.textContent = `${activeBranch.files.length} file${activeBranch.files.length === 1 ? "" : "s"}`;
   renderFiles();
+  showCanvasMessage(activeBranch.files.length ? "Select a BPMN file to view it." : "This branch has no BPMN files.");
   el.viewerStatus.textContent = "";
 }
 function renderFiles() {
@@ -106,22 +120,23 @@ function renderFiles() {
   el.fileList.replaceChildren();
   (activeBranch?.files || []).filter(file => file.path.toLowerCase().includes(term)).forEach(file => {
     const button = document.createElement("button");
-    button.className = "file-item";
+    button.className = "file-item" + (activeFileId === file.id ? " active" : "");
     button.textContent = file.path;
-    button.onclick = () => viewFile(file, button);
+    button.onclick = () => viewFile(file);
     el.fileList.appendChild(button);
   });
   if (!el.fileList.children.length) el.fileList.innerHTML = '<div class="empty small-empty">No matching files.</div>';
 }
-async function viewFile(file, button) {
-  document.querySelectorAll(".file-item.active").forEach(item => item.classList.remove("active"));
-  button.classList.add("active");
+async function viewFile(file) {
+  activeFileId = file.id;
+  renderFiles();
   el.viewerStatus.textContent = `Viewing ${file.path}`;
   try {
-    if (!viewer) viewer = new BpmnJS({ container: el.canvas });
+    showDiagram();
+    if (!viewer) viewer = new BpmnJS({ container: el.diagramHost });
     await viewer.importXML(file.xml);
     viewer.get("canvas").zoom("fit-viewport");
-  } catch (error) { el.canvas.innerHTML = `<div class="empty error">Could not display this BPMN: ${String(error.message || error)}</div>`; }
+  } catch (error) { showCanvasMessage(`Could not display this BPMN: ${String(error.message || error)}`, true); }
 }
 async function uploadBranch(event) {
   event.preventDefault();
@@ -183,7 +198,7 @@ function boot() {
     el.login.hidden = !!user; el.vault.hidden = !user; el.signOut.hidden = !user;
     el.userLabel.textContent = user ? (user.email || user.displayName || "Signed in") : "";
     if (user) { el.welcome.textContent = `Signed in as ${user.email || user.displayName}`; status("Enter the vault password to load branches."); }
-    else { vaultPassword = ""; branches = []; activeBranch = null; el.library.hidden = true; }
+    else { vaultPassword = ""; branches = []; activeBranch = null; activeFileId = null; el.library.hidden = true; showCanvasMessage("Select a BPMN file to view it."); }
   });
 }
 boot();
