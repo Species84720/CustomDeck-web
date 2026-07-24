@@ -29,7 +29,7 @@
 
       <div id="library" hidden class="library-grid">
         <aside class="card sidebar">
-          <div class="section-heading"><div><span class="eyebrow">Branches</span><h2>Versions</h2></div><button id="upload-open" class="button small">Update</button></div>
+          <div class="section-heading"><div><span class="eyebrow">Branches</span><h2>Versions</h2></div></div>
           <input id="branch-search" class="search" type="search" placeholder="Search branches">
           <div id="branch-list" class="branch-list"></div>
         </aside>
@@ -41,19 +41,7 @@
       </div>
     </section>
   </main>
-
-  <dialog id="upload-dialog">
-    <form id="upload-form" method="dialog">
-      <h2>Update branch BPMNs</h2>
-      <p class="muted">Choose a local branch folder. Existing files with the same relative path are replaced. Files are encrypted in your browser before upload.</p>
-      <label>Branch name<input id="upload-branch" required placeholder="feature/my-process"></label>
-      <label>BPMN folder<input id="upload-files" type="file" webkitdirectory directory multiple required></label>
-      <p id="upload-status" class="status"></p>
-      <menu><button id="upload-cancel" type="button" class="button subtle">Cancel</button><button type="submit" class="button primary">Encrypt and upload</button></menu>
-    </form>
-  </dialog>
-
-  <script src="https://unpkg.com/bpmn-js@9.4.1/dist/bpmn-viewer.production.min.js"></script>
+<script src="https://unpkg.com/bpmn-js@9.4.1/dist/bpmn-viewer.production.min.js"></script>
   <script src="config.js"></script>
   <script type="module" src="app.js"></script>
 </body>

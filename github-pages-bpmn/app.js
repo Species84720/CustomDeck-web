@@ -1,5 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
-import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithRedirect, signOut } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 import { getFirestore, collection, doc, deleteDoc, getDoc, getDocs, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
 const cfg = window.BPMN_VAULT_CONFIG?.firebase;
@@ -10,7 +10,7 @@ const el = {
   vaultStatus: $("vault-status"), password: $("vault-password"), unlock: $("unlock"), branchSearch: $("branch-search"),
   branchList: $("branch-list"), branchTitle: $("branch-title"), fileCount: $("file-count"), fileSearch: $("file-search"),
   fileList: $("file-list"), viewerStatus: $("viewer-status"), canvas: $("canvas"), uploadDialog: $("upload-dialog"),
-  uploadOpen: $("upload-open"), uploadForm: $("upload-form"), uploadBranch: $("upload-branch"), uploadFiles: $("upload-files"),
+  uploadOpen: null, uploadForm: $("upload-form"), uploadBranch: $("upload-branch"), uploadFiles: $("upload-files"),
   uploadCancel: $("upload-cancel"), uploadStatus: $("upload-status")
 };
 
@@ -50,7 +50,7 @@ function isBpmn(file) { return /\.bpmn(?:20\.xml)?$/i.test(file.name); }
 
 async function signIn() {
   if (!auth) return;
-  try { await signInWithPopup(auth, new GoogleAuthProvider()); }
+  try { await signInWithRedirect(auth, new GoogleAuthProvider()); }
   catch (error) { el.authStatus.textContent = error.message || "Google sign-in failed."; }
 }
 async function loadBranches() {
@@ -172,9 +172,6 @@ function wire() {
   el.password.onkeydown = event => { if (event.key === "Enter") unlock(); };
   el.branchSearch.oninput = renderBranches;
   el.fileSearch.oninput = renderFiles;
-  el.uploadOpen.onclick = () => { el.uploadStatus.textContent = ""; el.uploadDialog.showModal(); };
-  el.uploadCancel.onclick = () => el.uploadDialog.close();
-  el.uploadForm.onsubmit = uploadBranch;
 }
 function boot() {
   wire();
