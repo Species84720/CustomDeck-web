@@ -99,6 +99,11 @@ input:focus, textarea:focus, select:focus {
 .stat .value { font-size: 20px; font-weight: 700; line-height: 1.1; }
 .timeline { display: grid; gap: 8px; }
 .view-panel[hidden] { display: none !important; }
+.is-dragging,
+.is-dragging * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
 .day-grid { user-select:none;
   position: relative;
   height: 900px;

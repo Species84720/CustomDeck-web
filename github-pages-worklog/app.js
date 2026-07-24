@@ -118,6 +118,7 @@ let jiraUnlockSource = "";
 let currentView = "day";
 let dragState = null;
 let suppressContextMenuUntil = 0;
+let dragSelectionGuardWired = false;
 const TODO_STORAGE_KEY = "worklog-todos-v1";
 let todos = loadTodos();
 const QUICK_ACTION_KEYS = ["quickAction", "source", "id", "task", "note", "date", "start", "end", "tag", "jiraIssue", "jiraLogged", "noJira", "isOvertime", "location", "reason", "closePreviousId"];
@@ -641,6 +642,25 @@ function localDateTimeLabel(value) {
   if (Number.isNaN(date.getTime())) return String(value);
   return `${localDateKey(date)} ${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
 }
+function beginDragSelectionGuard() {
+  document.body.classList.add("is-dragging");
+}
+function endDragSelectionGuard() {
+  document.body.classList.remove("is-dragging");
+}
+function wireDragSelectionGuard() {
+  if (dragSelectionGuardWired) return;
+  dragSelectionGuardWired = true;
+  window.addEventListener("mouseup", () => {
+    if (dragState?.ghost?.parentElement) dragState.ghost.remove();
+    dragState = null;
+    endDragSelectionGuard();
+  });
+  document.addEventListener("selectstart", event => {
+    if (!dragState) return;
+    event.preventDefault();
+  });
+}
 function selectedTodoDate() {
   return String(el.dayPicker?.value || localDateKey()).slice(0, 10);
 }
@@ -721,10 +741,9 @@ function renderTodos() {
     finishedSection.hidden = visibleFinished.length === 0;
     finishedList.innerHTML = visibleFinished.map(todo => {
       const locked = todoIsLocked(todo);
-      const canMutate = todoCanChange(todo);
+      const canUndo = !locked;
       return `<li class="todo-item done${locked ? " locked" : ""}">
-        <label class="todo-check-label"><input type="checkbox" data-todo-action="toggle" data-todo-id="${todo.id}" checked ${canMutate ? "" : "disabled"}><span class="todo-checkbox" aria-hidden="true">✓</span><span class="todo-text-wrap"><span class="todo-text">${escapeHtml(todo.text)}${todo.jiraIssue ? ` <span class="badge todo-jira" data-jira-issue="${escapeHtml(todo.jiraIssue)}">${escapeHtml(todo.jiraIssue)}</span>` : ""}</span><span class="todo-meta">Finished ${escapeHtml(localDateTimeLabel(todo.completedAt || todo.completedDate))}${locked ? " · locked" : ""}</span></span></label>
-        ${canMutate ? `<button class="todo-edit" type="button" data-todo-action="edit" data-todo-id="${todo.id}" aria-label="Edit todo">✎</button><button class="todo-delete" type="button" data-todo-action="delete" data-todo-id="${todo.id}" aria-label="Delete todo">×</button>` : ""}
+        <label class="todo-check-label">${canUndo ? `<input type="checkbox" data-todo-action="toggle" data-todo-id="${todo.id}" checked>` : ""}<span class="todo-checkbox" aria-hidden="true">✓</span><span class="todo-text-wrap"><span class="todo-text">${escapeHtml(todo.text)}${todo.jiraIssue ? ` <span class="badge todo-jira" data-jira-issue="${escapeHtml(todo.jiraIssue)}">${escapeHtml(todo.jiraIssue)}</span>` : ""}</span><span class="todo-meta">Finished ${escapeHtml(localDateTimeLabel(todo.completedAt || todo.completedDate))}${locked ? " · locked" : " · can undo today"}</span></span></label>
       </li>`;
     }).join("");
   }
@@ -1226,11 +1245,13 @@ function buildDayGrid(entries) {
     ghost.style.top = `${y}px`;
     ghost.style.height = "2px";
     grid.appendChild(ghost);
+    beginDragSelectionGuard();
     dragState = { startY: y, mode: ev.button === 2 ? "work" : "task", ghost };
   });
 
   grid.addEventListener("mousemove", ev => {
     if (!dragState?.ghost) return;
+    ev.preventDefault();
     const rect = grid.getBoundingClientRect();
     const y = Math.max(0, Math.min(rect.height, ev.clientY - rect.top));
     const lo = Math.min(dragState.startY, y);
@@ -1243,6 +1264,7 @@ function buildDayGrid(entries) {
     if (ev.button !== 0 && ev.button !== 2) return;
     if (ev.button === 2) ev.preventDefault();
     if (!dragState) return;
+    endDragSelectionGuard();
     const rect = grid.getBoundingClientRect();
     const endY = Math.max(0, Math.min(rect.height, ev.clientY - rect.top));
     const lo = Math.min(dragState.startY, endY);
@@ -2167,6 +2189,7 @@ function friendlyAuthError(err) {
 }
 
 function wireEvents() {
+  wireDragSelectionGuard();
   const updateThemeButton = () => {
     const light = document.documentElement.dataset.theme === "light";
     el.themeBtn.textContent = light ? "☾ Dark" : "☀ Light";

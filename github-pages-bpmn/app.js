@@ -362,13 +362,16 @@ function fitDiagram() {
 function beginPan(event) {
   if (!viewer || event.button !== 0) return;
   if (event.target.closest(".djs-element")) return;
+  event.preventDefault();
   const canvas = viewer.get("canvas");
   const viewbox = canvas.viewbox();
   panState = { x: event.clientX, y: event.clientY, viewbox };
+  document.body.classList.add("is-panning");
   el.canvas.classList.add("is-panning");
 }
 function movePan(event) {
   if (!panState || !viewer) return;
+  event.preventDefault();
   const canvas = viewer.get("canvas");
   const dx = (event.clientX - panState.x) / panState.viewbox.scale;
   const dy = (event.clientY - panState.y) / panState.viewbox.scale;
@@ -376,6 +379,7 @@ function movePan(event) {
 }
 function endPan() {
   panState = null;
+  document.body.classList.remove("is-panning");
   el.canvas.classList.remove("is-panning");
 }
 function renderProps(element = activeElement) {
@@ -512,6 +516,10 @@ function bindViewerEvents() {
   el.canvas.addEventListener("pointerdown", beginPan);
   window.addEventListener("pointermove", movePan);
   window.addEventListener("pointerup", endPan);
+  document.addEventListener("selectstart", event => {
+    if (!panState) return;
+    event.preventDefault();
+  });
   el.canvas.addEventListener("wheel", event => {
     if (!viewer || !event.ctrlKey) return;
     event.preventDefault();
