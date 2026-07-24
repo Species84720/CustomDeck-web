@@ -99,8 +99,13 @@
       <div class="todo-header"><div><span class="eyebrow">Focus</span><h2 id="todo-title">My todo list</h2></div><span id="todo-count" class="todo-count">0 left</span></div>
       <form id="todo-form" class="todo-form"><input id="todo-input" type="text" maxlength="140" placeholder="What needs doing?" aria-label="New todo" required><input id="todo-jira" type="text" maxlength="32" placeholder="Jira key (optional)" aria-label="Jira issue key"><button class="btn primary todo-add" type="submit" aria-label="Add todo">+</button></form>
       <div class="todo-progress" aria-hidden="true"><span id="todo-progress-bar"></span></div>
+      <div class="todo-section-label">Open todos</div>
       <ul id="todo-list" class="todo-list"></ul>
       <div id="todo-empty" class="todo-empty"><span>✓</span><strong>All clear</strong><p>Add a task above to plan your next step.</p></div>
+      <section id="todo-finished-section" class="todo-finished-section" hidden>
+        <div class="todo-section-label" id="todo-finished-title">Finished</div>
+        <ul id="todo-finished-list" class="todo-list todo-finished-list"></ul>
+      </section>
       <button id="todo-clear" class="todo-clear" type="button" hidden>Clear completed</button>
     </aside>
     <aside class="sprint-issues-panel card" aria-labelledby="sprint-issues-title">
@@ -255,7 +260,6 @@
   <script type="module" src="./app.js"></script>
 </body>
 </html>
-
 
 
 

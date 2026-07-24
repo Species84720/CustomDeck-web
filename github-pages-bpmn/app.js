@@ -11,7 +11,7 @@ const el = {
   branchList: $("branch-list"), branchTitle: $("branch-title"), fileCount: $("file-count"), fileSearch: $("file-search"),
   branchSidebar: $("branch-sidebar"), libraryGrid: $("library"), contentGrid: $("content-grid"), filePane: $("file-pane"),
   fileList: $("file-list"), viewerStatus: $("viewer-status"), canvas: $("canvas"), diagramHost: $("diagram-host"), canvasEmpty: $("canvas-empty"),
-  toggleBranches: $("toggle-branches"), toggleBranchesToolbar: $("toggle-branches-toolbar"), toggleFiles: $("toggle-files"), toggleProps: $("toggle-props"),
+  navigateUp: $("navigate-up"), navPath: $("nav-path"), toggleBranches: $("toggle-branches"), toggleBranchesToolbar: $("toggle-branches-toolbar"), toggleFiles: $("toggle-files"), toggleProps: $("toggle-props"),
   zoomIn: $("zoom-in"), zoomOut: $("zoom-out"), zoomFit: $("zoom-fit"), propsPanel: $("props-panel"), propsContent: $("props-content"), uploadDialog: $("upload-dialog"),
   uploadOpen: null, uploadForm: $("upload-form"), uploadBranch: $("upload-branch"), uploadFiles: $("upload-files"),
   uploadCancel: $("upload-cancel"), uploadStatus: $("upload-status")
@@ -25,6 +25,7 @@ let branchesOpen = true;
 let filesOpen = true;
 let propsOpen = true;
 let panState = null;
+let currentRootElement = null;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const MAX_FILE_BYTES = 900000;
@@ -207,6 +208,45 @@ function readSignalMessageDefinitions(bo) {
     ...readDefinitionsByType(bo, "bpmn:Signal").map(item => ({ type: "Signal", id: item.id || "—", name: item.name || "—" })),
     ...readDefinitionsByType(bo, "bpmn:Message").map(item => ({ type: "Message", id: item.id || "—", name: item.name || "—" }))
   ];
+}
+function parentChain(bo) {
+  const chain = [];
+  for (let current = bo; current; current = current.$parent) {
+    if (current.$type === "bpmn:SubProcess" || current.$type === "bpmn:Process") chain.push(current);
+  }
+  return chain.reverse();
+}
+function displayName(bo) {
+  return bo?.name || bo?.id || nsKey(bo?.$type) || "Process";
+}
+function planeForBusinessObject(bo) {
+  if (!viewer || !bo) return null;
+  const canvas = viewer.get("canvas");
+  const elementRegistry = viewer.get("elementRegistry");
+  let plane = canvas.findRoot(bo.id);
+  if (plane) return plane;
+  if (bo.$type === "bpmn:Process") {
+    const participant = elementRegistry.getAll().find(element => element?.businessObject?.processRef === bo);
+    if (participant) plane = canvas.findRoot(participant.id);
+  }
+  return plane || null;
+}
+function updateNavigationState(rootElement = currentRootElement) {
+  currentRootElement = rootElement || currentRootElement;
+  const bo = currentRootElement?.businessObject || currentRootElement || null;
+  const chain = bo ? parentChain(bo) : [];
+  el.navPath.textContent = chain.length ? chain.map(displayName).join(" / ") : "Main process";
+  el.navigateUp.disabled = chain.length <= 1;
+}
+function navigateUp() {
+  if (!viewer || !currentRootElement) return;
+  const bo = currentRootElement.businessObject || currentRootElement;
+  const chain = parentChain(bo);
+  if (chain.length <= 1) return;
+  const parentBo = chain[chain.length - 2];
+  const parentPlane = planeForBusinessObject(parentBo);
+  if (!parentPlane) return;
+  viewer.get("canvas").setRootElement(parentPlane);
 }
 function sanitizeForDisplay(value, depth = 0, seen = new WeakSet()) {
   if (value == null) return value;
@@ -468,6 +508,7 @@ function bindViewerEvents() {
   const eventBus = viewer.get("eventBus");
   eventBus.on("element.click", event => renderProps(event.element));
   eventBus.on("canvas.click", () => renderProps(null));
+  eventBus.on("root.set", event => updateNavigationState(event.element));
   el.canvas.addEventListener("pointerdown", beginPan);
   window.addEventListener("pointermove", movePan);
   window.addEventListener("pointerup", endPan);
@@ -532,6 +573,8 @@ async function selectBranch(branchId) {
   renderFiles();
   showCanvasMessage(activeBranch.files.length ? "Select a BPMN file to view it." : "This branch has no BPMN files.");
   renderProps(null);
+  currentRootElement = null;
+  updateNavigationState(null);
   el.viewerStatus.textContent = "";
 }
 function renderFiles() {
@@ -608,6 +651,7 @@ function wire() {
   el.signIn.onclick = signIn;
   el.signOut.onclick = () => signOut(auth);
   el.unlock.onclick = unlock;
+  el.navigateUp.onclick = navigateUp;
   el.toggleBranches.onclick = () => setBranchesOpen(!branchesOpen);
   el.toggleBranchesToolbar.onclick = () => setBranchesOpen(!branchesOpen);
   el.toggleFiles.onclick = () => setFilesOpen(!filesOpen);

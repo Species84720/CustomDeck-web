@@ -30,7 +30,8 @@ input:focus { border-color:var(--accent); } .unlock-actions input { width:230px;
 .file-path { font-size:11px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .branch-item:hover,.file-item:hover { background:var(--panel2); } .branch-item.active,.file-item.active { background:#284b9a; border-color:var(--accent); }
 .file-item.active .file-path { color:#d8e4ff; }
-.pill { color:var(--muted); font-size:12px; } .file-toolbar { gap:10px; margin:14px 0 10px; flex-wrap:wrap; } .file-toolbar .search { max-width:360px; flex:1 1 280px; }
+.pill { color:var(--muted); font-size:12px; } .file-toolbar { gap:10px; margin:14px 0 10px; flex-wrap:wrap; } .file-toolbar .search { max-width:360px; flex:1 1 220px; }
+.nav-path { color:var(--muted); font-size:12px; min-width:120px; flex:1 1 180px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .content-grid { display:grid; grid-template-columns:280px minmax(0,1fr) 340px; gap:12px; height:560px; }
 .content-grid.files-collapsed { grid-template-columns:minmax(0,1fr) 340px; }
 .content-grid.props-collapsed { grid-template-columns:280px minmax(0,1fr); }
