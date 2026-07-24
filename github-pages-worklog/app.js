@@ -5,8 +5,8 @@ import { getFirestore, collection, doc, getDoc, getDocs, setDoc, deleteDoc, writ
 const cfg = window.WORKLOG_CONFIG || {};
 const TAGS = ["task", "story", "bug", "meeting", "support", "working-hours", "overtime", "other"];
 const DAY_GRID_HEIGHT = 900;
-const DAY_START = 5;
-const DAY_END = 22;
+const DAY_START_MINUTES = 5 * 60 + 30;
+const DAY_END_DEFAULT_MINUTES = 19 * 60;
 const JIRA_REMEMBERED_PASSPHRASE_STORAGE_KEY = "worklog-jira-passphrase-v1";
 const THEME_STORAGE_KEY = "worklog-theme";
 
@@ -137,6 +137,9 @@ function mins(hhmm) {
 
 function minToTime(value) {
   return `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
+}
+function ceilToStep(value, step) {
+  return Math.ceil(value / step) * step;
 }
 
 function durLabel(minutes) {
@@ -1164,14 +1167,28 @@ function renderList(targetEl, entries, emptyLabel = "No blocks") {
   }).join("");
 }
 
+function dayGridRangeMinutes(entries, date = el.dayPicker.value) {
+  const dayEntries = [...entries, ...allEntries.filter(e => e.date === date && isBackgroundSlot(e))];
+  let latestMinute = DAY_END_DEFAULT_MINUTES;
+  dayEntries.forEach(entry => {
+    const startMinute = entry.start ? mins(entry.start) : null;
+    const endMinute = entry.end ? mins(entry.end) : null;
+    if (Number.isFinite(startMinute)) latestMinute = Math.max(latestMinute, startMinute + 30);
+    if (Number.isFinite(endMinute)) latestMinute = Math.max(latestMinute, endMinute);
+  });
+  const endMinutes = Math.max(DAY_END_DEFAULT_MINUTES, ceilToStep(latestMinute, 30));
+  return { startMinutes: DAY_START_MINUTES, endMinutes };
+}
+
 function buildDayGrid(entries) {
   const grid = document.createElement("div");
   grid.className = "day-grid";
   grid.id = "day-grid";
   grid.style.height = `${DAY_GRID_HEIGHT}px`;
-  const totalMinutes = (DAY_END - DAY_START) * 60;
-  for (let h = DAY_START; h <= DAY_END; h += 1) {
-    const y = ((h - DAY_START) / (DAY_END - DAY_START)) * DAY_GRID_HEIGHT;
+  const { startMinutes, endMinutes } = dayGridRangeMinutes(entries, el.dayPicker.value);
+  const totalMinutes = endMinutes - startMinutes;
+  for (let marker = startMinutes; marker <= endMinutes; marker += 60) {
+    const y = ((marker - startMinutes) / totalMinutes) * DAY_GRID_HEIGHT;
     const line = document.createElement("div");
     line.className = "hour-line";
     line.style.top = `${y}px`;
@@ -1179,7 +1196,7 @@ function buildDayGrid(entries) {
     const label = document.createElement("div");
     label.className = "hour-label";
     label.style.top = `${y}px`;
-    label.textContent = `${String(h).padStart(2, "0")}:00`;
+    label.textContent = minToTime(marker);
     grid.appendChild(label);
   }
   const slotEntries = allEntries.filter(e => e.date === el.dayPicker.value && isBackgroundSlot(e));
@@ -1188,12 +1205,12 @@ function buildDayGrid(entries) {
     const start = mins(slot.start);
     const end = mins(slot.end);
     if (!(end > start)) return;
-    const cs = Math.max(start, DAY_START * 60);
-    const ce = Math.min(end, DAY_END * 60);
+    const cs = Math.max(start, startMinutes);
+    const ce = Math.min(end, endMinutes);
     if (ce <= cs) return;
     const band = document.createElement("div");
     band.className = `work-band ${slot.isOvertime || slot.tag === "overtime" ? "overtime" : "normal"}`;
-    band.style.top = `${((cs - DAY_START * 60) / totalMinutes) * DAY_GRID_HEIGHT}px`;
+    band.style.top = `${((cs - startMinutes) / totalMinutes) * DAY_GRID_HEIGHT}px`;
     band.style.height = `${Math.max(8, ((ce - cs) / totalMinutes) * DAY_GRID_HEIGHT)}px`;
     band.dataset.id = slot.id;
     band.addEventListener("contextmenu", ev => {
@@ -1213,9 +1230,9 @@ function buildDayGrid(entries) {
   entries.forEach(e => {
     if (!e.start) return;
     const start = mins(e.start);
-    if (start < DAY_START * 60 || start > DAY_END * 60) return;
-    const end = e.end ? mins(e.end) : Math.min(start + 30, DAY_END * 60);
-    const top = ((start - DAY_START * 60) / totalMinutes) * DAY_GRID_HEIGHT;
+    if (start < startMinutes || start > endMinutes) return;
+    const end = e.end ? mins(e.end) : Math.min(start + 30, endMinutes);
+    const top = ((start - startMinutes) / totalMinutes) * DAY_GRID_HEIGHT;
     const height = Math.max(22, ((Math.max(end, start + 15) - start) / totalMinutes) * DAY_GRID_HEIGHT);
     const block = document.createElement("div");
     block.className = `day-block${e.isOvertime ? " ot" : ""}`;
@@ -1288,8 +1305,8 @@ function buildDayGrid(entries) {
     const mode = dragState.mode;
     dragState = null;
     if (hi - lo < 10) return;
-    const startMin = DAY_START * 60 + Math.round((lo / rect.height) * totalMinutes / 15) * 15;
-    const endMin = DAY_START * 60 + Math.round((hi / rect.height) * totalMinutes / 15) * 15;
+    const startMin = startMinutes + Math.round((lo / rect.height) * totalMinutes / 15) * 15;
+    const endMin = startMinutes + Math.round((hi / rect.height) * totalMinutes / 15) * 15;
     if (mode === "work") {
       const chosen = await chooseSlotType();
       if (chosen === "cancel") return;
