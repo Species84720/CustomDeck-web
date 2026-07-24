@@ -25,6 +25,8 @@ let branchesOpen = true;
 let filesOpen = true;
 let propsOpen = true;
 let panState = null;
+let pinchState = null;
+const pointerState = new Map();
 let currentRootElement = null;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -368,28 +370,87 @@ function fitDiagram() {
   if (!viewer) return;
   viewer.get("canvas").zoom("fit-viewport");
 }
+function pointerValues() {
+  return [...pointerState.values()];
+}
+function pointerDistance(first, second) {
+  return Math.hypot(second.x - first.x, second.y - first.y);
+}
+function startPinch() {
+  if (!viewer || pointerState.size < 2) return;
+  const [first, second] = pointerValues();
+  const distance = pointerDistance(first, second);
+  if (!distance) return;
+  panState = null;
+  pinchState = { distance, scale: currentScale() };
+  document.body.classList.add("is-panning");
+  el.canvas.classList.add("is-panning");
+}
+function endInteraction() {
+  panState = null;
+  pinchState = null;
+  document.body.classList.remove("is-panning");
+  el.canvas.classList.remove("is-panning");
+}
 function beginPan(event) {
-  if (!viewer || event.button !== 0) return;
-  if (event.target.closest(".djs-element")) return;
+  if (!viewer) return;
+  const target = event.target instanceof Element ? event.target : null;
+  const onDiagramElement = !!target?.closest(".djs-element");
+  pointerState.set(event.pointerId, { x: event.clientX, y: event.clientY, onDiagramElement });
+  if (pointerState.size >= 2 && event.pointerType !== "mouse") {
+    event.preventDefault();
+    startPinch();
+    return;
+  }
+  if (event.pointerType !== "mouse") {
+    if (onDiagramElement) return;
+    event.preventDefault();
+    const canvas = viewer.get("canvas");
+    const viewbox = canvas.viewbox();
+    panState = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, viewbox };
+    pinchState = null;
+    document.body.classList.add("is-panning");
+    el.canvas.classList.add("is-panning");
+    return;
+  }
+  if (event.button !== 0 || onDiagramElement) return;
   event.preventDefault();
   const canvas = viewer.get("canvas");
   const viewbox = canvas.viewbox();
-  panState = { x: event.clientX, y: event.clientY, viewbox };
+  panState = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, viewbox };
+  pinchState = null;
   document.body.classList.add("is-panning");
   el.canvas.classList.add("is-panning");
 }
 function movePan(event) {
-  if (!panState || !viewer) return;
+  if (!viewer) return;
+  if (pointerState.has(event.pointerId)) {
+    const previous = pointerState.get(event.pointerId) || {};
+    pointerState.set(event.pointerId, { ...previous, x: event.clientX, y: event.clientY });
+  }
+  if (pinchState && pointerState.size >= 2) {
+    event.preventDefault();
+    const [first, second] = pointerValues();
+    const distance = pointerDistance(first, second);
+    if (!distance) return;
+    setZoom(pinchState.scale * (distance / pinchState.distance));
+    return;
+  }
+  if (!panState || panState.pointerId !== event.pointerId) return;
   event.preventDefault();
   const canvas = viewer.get("canvas");
   const dx = (event.clientX - panState.x) / panState.viewbox.scale;
   const dy = (event.clientY - panState.y) / panState.viewbox.scale;
   canvas.viewbox({ x: panState.viewbox.x - dx, y: panState.viewbox.y - dy, width: panState.viewbox.width, height: panState.viewbox.height });
 }
-function endPan() {
-  panState = null;
-  document.body.classList.remove("is-panning");
-  el.canvas.classList.remove("is-panning");
+function endPan(event) {
+  if (event?.pointerId !== undefined) pointerState.delete(event.pointerId);
+  if (pointerState.size >= 2 && event?.pointerType !== "mouse") {
+    startPinch();
+    return;
+  }
+  if (panState && event?.pointerId !== undefined && panState.pointerId !== event.pointerId) return;
+  endInteraction();
 }
 function renderProps(element = activeElement) {
   activeElement = element || null;
@@ -525,8 +586,9 @@ function bindViewerEvents() {
   el.canvas.addEventListener("pointerdown", beginPan);
   window.addEventListener("pointermove", movePan);
   window.addEventListener("pointerup", endPan);
+  window.addEventListener("pointercancel", endPan);
   document.addEventListener("selectstart", event => {
-    if (!panState) return;
+    if (!panState && !pinchState) return;
     event.preventDefault();
   });
   el.canvas.addEventListener("wheel", event => {
