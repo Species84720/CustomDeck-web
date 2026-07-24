@@ -762,7 +762,25 @@ function wireTodoEvents() {
   const input = document.getElementById("todo-input");
   const jiraInput = document.getElementById("todo-jira");
   const list = document.getElementById("todo-list");
+  const finishedList = document.getElementById("todo-finished-list");
   const clear = document.getElementById("todo-clear");
+  const handleTodoToggle = event => {
+    const control = event.target;
+    if (!(control instanceof HTMLInputElement) || control.dataset.todoAction !== "toggle") return;
+    const id = control.dataset.todoId;
+    const todo = todos.find(item => item.id === id);
+    if (!todo || !todoCanChange(todo)) return;
+    if (control.checked) {
+      todo.done = true;
+      todo.completedAt = new Date().toISOString();
+      todo.completedDate = localDateKey();
+    } else {
+      todo.done = false;
+      todo.completedAt = "";
+      todo.completedDate = "";
+    }
+    saveTodos(); renderTodos();
+  };
   form.addEventListener("submit", event => {
     event.preventDefault();
     const text = input.value.trim();
@@ -773,6 +791,8 @@ function wireTodoEvents() {
     if (jiraInput) jiraInput.value = "";
     saveTodos(); renderTodos();
   });
+  list.addEventListener("change", handleTodoToggle);
+  finishedList?.addEventListener("change", handleTodoToggle);
   list.addEventListener("click", event => {
     const control = event.target.closest("[data-todo-action]");
     if (!control) return;
@@ -786,17 +806,6 @@ function wireTodoEvents() {
     const todo = todos.find(item => item.id === id);
     if (!todo || !todoCanChange(todo)) return;
     if (control.dataset.todoAction === "delete") todos = todos.filter(item => item.id !== id);
-    if (control.dataset.todoAction === "toggle") {
-      if (control.checked) {
-        todo.done = true;
-        todo.completedAt = new Date().toISOString();
-        todo.completedDate = localDateKey();
-      } else {
-        todo.done = false;
-        todo.completedAt = "";
-        todo.completedDate = "";
-      }
-    }
     saveTodos(); renderTodos();
   });
   clear.addEventListener("click", () => { renderTodos(); });
