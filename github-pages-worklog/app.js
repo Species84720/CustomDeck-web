@@ -1202,6 +1202,11 @@ function buildDayGrid(entries) {
       const entry = allEntries.find(x => x.id === slot.id);
       if (entry) openEditor(entry);
     });
+    band.addEventListener("mousedown", ev => {
+      if (ev.button === 2) {
+        ev.stopPropagation();
+      }
+    });
     grid.appendChild(band);
   });
 
@@ -1247,7 +1252,7 @@ function buildDayGrid(entries) {
     }
     const target = ev.target;
     const targetElement = target instanceof Element ? target : null;
-    if (targetElement && targetElement.closest(".day-block")) return;
+    if (targetElement && targetElement.closest(".day-block, .work-band")) return;
     const rect = grid.getBoundingClientRect();
     const y = Math.max(0, Math.min(rect.height, ev.clientY - rect.top));
     const ghost = document.createElement("div");
@@ -1301,7 +1306,12 @@ function buildDayGrid(entries) {
     });
   });
 
-  grid.addEventListener("contextmenu", ev => { ev.preventDefault(); ev.stopPropagation(); }, true)
+  grid.addEventListener("contextmenu", ev => {
+    const target = ev.target instanceof Element ? ev.target : null;
+    if (target?.closest(".day-block, .work-band")) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+  });
 
   return grid;
 }
