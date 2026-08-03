@@ -941,9 +941,18 @@ function issueTypeColor(entry) {
   if (!t) return "#4f8cff";
   if (t.includes("bug")) return "#ef4444";
   if (t.includes("story")) return "#22c55e";
-  if (t.includes("epic")) return "#f59e0b";
-  if (t.includes("task") || t.includes("sub-task")) return "#3b82f6";
-  if (t.includes("support") || t.includes("incident")) return "#ec4899";
+  if (t.includes("impediment")) return "#f97316";
+  if (t.includes("buffer")) return "#6b7280";
+  if (t.includes("support")) return "#ef4444";
+  if (t.includes("discovery")) return "#eab308";
+  if (t.includes("kaizen")) return "#22c55e";
+  if (t.includes("epic")) return "#a855f7";
+  if (t.includes("planning")) return "#2563eb";
+  if (t.includes("sre task")) return "#84cc16";
+  if (t.includes("marval call")) return "#facc15";
+  if (t.includes("technical governance")) return "#06b6d4";
+  if (t.includes("task") || t.includes("sub-task")) return "#60a5fa";
+  if (t.includes("incident")) return "#ef4444";
   return "#4f8cff";
 }
 
@@ -1129,7 +1138,7 @@ function renderCurrentSprintIssues(message = "") {
     return;
   }
   el.sprintIssuesList.innerHTML = jiraIssueCache.map(issue => `
-    <button type="button" class="sprint-issue-item" data-jira-issue="${escapeHtml(issue.key)}">
+    <button type="button" class="sprint-issue-item" data-jira-issue="${escapeHtml(issue.key)}" style="border-left:4px solid ${issueTypeColor({ jiraIssue: issue.key })}">
       <span class="badge">${escapeHtml(issue.key)}</span>
       <span class="sprint-issue-copy"><span>${escapeHtml(issue.summary || "Summary unavailable")}</span><span class="jira-status">${escapeHtml(jiraIssueStatus(issue))}</span></span>
     </button>`).join("");
