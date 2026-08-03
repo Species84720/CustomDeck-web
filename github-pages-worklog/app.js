@@ -106,6 +106,7 @@ const el = {
   jiraEmail: document.getElementById("f-jira-email"),
   jiraApiToken: document.getElementById("f-jira-api-token"),
   jiraPbiDraftUrl: document.getElementById("f-pbi-draft-url"),
+  jiraUatApiUrl: document.getElementById("f-uat-api-url"),
   desktopSyncUid: document.getElementById("f-desktop-sync-uid"),
   jiraPassphrase: document.getElementById("f-jira-passphrase"),
   jiraPassphraseConfirm: document.getElementById("f-jira-passphrase-confirm"),
@@ -123,6 +124,24 @@ const el = {
   pbiSubmitBtn: document.getElementById("btn-pbi-submit"),
   pbiDebugRequest: document.getElementById("pbi-debug-request"),
   pbiDebugResponse: document.getElementById("pbi-debug-response"),
+  uatDialog: document.getElementById("uat-dialog"),
+  uatStatus: document.getElementById("uat-status"),
+  uatSearchPanel: document.getElementById("uat-search-panel"),
+  uatResultPanel: document.getElementById("uat-result-panel"),
+  uatIssueInput: document.getElementById("uat-issue-input"),
+  uatFetchBtn: document.getElementById("btn-uat-fetch"),
+  uatOpenSettingsBtn: document.getElementById("btn-uat-open-settings"),
+  uatError: document.getElementById("uat-error"),
+  uatIssueKeyLabel: document.getElementById("uat-issue-key-label"),
+  uatIssueSummary: document.getElementById("uat-issue-summary"),
+  uatIssueUrl: document.getElementById("uat-issue-url"),
+  uatTestCaseName: document.getElementById("uat-test-case-name"),
+  uatTestPurpose: document.getElementById("uat-test-purpose"),
+  uatRequirements: document.getElementById("uat-requirements"),
+  uatInputTestData: document.getElementById("uat-input-test-data"),
+  uatStepsBody: document.getElementById("uat-steps-body"),
+  uatCopyBtn: document.getElementById("btn-uat-copy"),
+  uatResetBtn: document.getElementById("btn-uat-reset"),
   deleteBtn: document.getElementById("btn-delete"),
   cancelBtn: document.getElementById("btn-cancel")
 };
@@ -149,6 +168,8 @@ let jiraUnlockSource = "";
 let currentPbiClassification = "";
 let currentPbiIssueType = "";
 let currentPbiDraftFields = null;
+let currentUatIssueKey = "";
+let currentUatData = null;
 let currentView = "day";
 let dragState = null;
 let suppressContextMenuUntil = 0;
@@ -193,7 +214,15 @@ function locationLabel(value) {
 }
 
 function emptyJiraSettings() {
-  return { baseUrl: "", project: "", email: "", apiToken: "", encryptedApiToken: null, pbiDraftUrl: String(cfg.pbiDraftUrl || "").trim() };
+  return {
+    baseUrl: "",
+    project: "",
+    email: "",
+    apiToken: "",
+    encryptedApiToken: null,
+    pbiDraftUrl: String(cfg.pbiDraftUrl || "").trim(),
+    uatApiUrl: String(cfg.uatApiUrl || "").trim()
+  };
 }
 
 function bytesToBase64(bytes) {
@@ -303,7 +332,8 @@ function normalizeJiraSettings(raw) {
     email: String(raw?.email || raw?.jiraEmail || "").trim(),
     apiToken: String(raw?.apiToken || raw?.jiraApiToken || "").trim(),
     encryptedApiToken,
-    pbiDraftUrl: String(raw?.pbiDraftUrl || cfg.pbiDraftUrl || "").trim()
+    pbiDraftUrl: String(raw?.pbiDraftUrl || cfg.pbiDraftUrl || "").trim(),
+    uatApiUrl: String(raw?.uatApiUrl || cfg.uatApiUrl || "").trim()
   };
 }
 
@@ -443,6 +473,7 @@ function fillJiraSettingsForm() {
   el.jiraEmail.value = settings.email;
   el.jiraApiToken.value = "";
   el.jiraPbiDraftUrl.value = settings.pbiDraftUrl || "";
+  el.jiraUatApiUrl.value = settings.uatApiUrl || "";
   el.desktopSyncUid.value = currentUser?.uid || "";
   el.jiraPassphrase.value = "";
   el.jiraPassphraseConfirm.value = "";
@@ -526,6 +557,7 @@ async function saveJiraSettings(evt) {
       project: el.jiraProject.value,
       email: el.jiraEmail.value,
       pbiDraftUrl: el.jiraPbiDraftUrl.value,
+      uatApiUrl: el.jiraUatApiUrl.value,
       apiToken: userJiraSettings.apiToken,
       encryptedApiToken: userJiraSettings.encryptedApiToken
     });
@@ -587,6 +619,7 @@ async function saveJiraSettings(evt) {
       project: baseSettings.project,
       email: baseSettings.email,
       pbiDraftUrl: baseSettings.pbiDraftUrl,
+      uatApiUrl: baseSettings.uatApiUrl,
       encryptedApiToken,
       updatedAt: serverTimestamp()
     });
@@ -662,6 +695,10 @@ function getPbiDraftUrl(settings = userJiraSettings) {
   return String(settings?.pbiDraftUrl || cfg.pbiDraftUrl || "").trim();
 }
 
+function getUatApiUrl(settings = userJiraSettings) {
+  return String(settings?.uatApiUrl || cfg.uatApiUrl || "").trim();
+}
+
 function getPbiHistory() {
   try {
     const stored = JSON.parse(localStorage.getItem(PBI_HISTORY_STORAGE_KEY) || "[]");
@@ -698,6 +735,13 @@ function updatePbiStatus(message = "", kind = "") {
   el.pbiStatus.classList.toggle("pbi-status-error", kind === "error");
 }
 
+function updateUatStatus(message = "", kind = "") {
+  if (!el.uatStatus) return;
+  el.uatStatus.textContent = message;
+  el.uatStatus.classList.toggle("pbi-status-ok", kind === "ok");
+  el.uatStatus.classList.toggle("pbi-status-error", kind === "error");
+}
+
 function resetPbiDraftEditor() {
   currentPbiClassification = "";
   currentPbiIssueType = "";
@@ -706,6 +750,151 @@ function resetPbiDraftEditor() {
   el.pbiClassification.hidden = true;
   el.pbiEditorSection.hidden = true;
   el.pbiDynamicForm.innerHTML = "";
+}
+
+function resetUatDialog() {
+  currentUatIssueKey = "";
+  currentUatData = null;
+  el.uatIssueInput.value = "";
+  el.uatIssueKeyLabel.textContent = "";
+  el.uatIssueSummary.textContent = "";
+  el.uatIssueUrl.href = "#";
+  el.uatIssueUrl.textContent = "Open in Jira";
+  el.uatTestCaseName.textContent = "";
+  el.uatTestPurpose.textContent = "";
+  el.uatRequirements.innerHTML = "";
+  el.uatInputTestData.textContent = "";
+  el.uatStepsBody.innerHTML = "";
+  el.uatSearchPanel.hidden = false;
+  el.uatResultPanel.hidden = true;
+  el.uatError.hidden = true;
+  el.uatError.textContent = "";
+}
+
+function showUatError(message) {
+  el.uatError.textContent = message;
+  el.uatError.hidden = false;
+}
+
+function hideUatError() {
+  el.uatError.hidden = true;
+  el.uatError.textContent = "";
+}
+
+function normalizeUatIssueKey(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+function buildUatRequestUrl(issueKey) {
+  const base = getUatApiUrl();
+  if (!base) throw new Error("Open Jira Settings and save the UAT API endpoint first.");
+  return base.includes("{issueKey}")
+    ? base.replaceAll("{issueKey}", encodeURIComponent(issueKey))
+    : base;
+}
+
+function openUatDialog(issueKey = "") {
+  resetUatDialog();
+  const normalizedIssueKey = normalizeUatIssueKey(issueKey);
+  if (normalizedIssueKey) el.uatIssueInput.value = normalizedIssueKey;
+  updateUatStatus(getUatApiUrl()
+    ? "UAT API endpoint loaded from Jira Settings."
+    : "Open Jira Settings and save the UAT API endpoint first.");
+  el.uatDialog.showModal();
+  if (normalizedIssueKey && getUatApiUrl()) {
+    fetchUatIssue();
+  }
+}
+
+function normalizeUatRequirements(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map(item => typeof item === "object" && item !== null ? String(item.item || item.name || item.value || "").trim() : String(item || "").trim())
+    .filter(Boolean);
+}
+
+function normalizeUatSteps(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map(item => typeof item === "object" && item !== null ? String(item.item || item.name || item.value || "").trim() : String(item || "").trim())
+    .filter(Boolean);
+}
+
+function renderUatData(data, issueKey) {
+  currentUatIssueKey = issueKey;
+  currentUatData = data || {};
+  el.uatSearchPanel.hidden = true;
+  el.uatResultPanel.hidden = false;
+  el.uatIssueKeyLabel.textContent = issueKey;
+  el.uatIssueSummary.textContent = String(data?.issue_summary || "No Summary");
+  const issueUrl = String(data?.issue_url || "").trim() || (userJiraSettings.baseUrl ? `${userJiraSettings.baseUrl.replace(/\/+$/, "")}/browse/${encodeURIComponent(issueKey)}` : "#");
+  el.uatIssueUrl.href = issueUrl;
+  el.uatIssueUrl.textContent = issueUrl === "#" ? "Open in Jira" : "Open in Jira";
+  el.uatTestCaseName.textContent = String(data?.test_case_name || "N/A");
+  el.uatTestPurpose.textContent = String(data?.test_purpose || "N/A");
+  el.uatInputTestData.textContent = String(data?.input_test_data || "N/A");
+  const requirements = normalizeUatRequirements(data?.requirements_covered);
+  el.uatRequirements.innerHTML = requirements.length
+    ? requirements.map(item => `<span class="req-item">${escapeHtml(item)}</span>`).join("")
+    : "<span class='muted'>N/A</span>";
+  const steps = normalizeUatSteps(data?.test_steps);
+  el.uatStepsBody.innerHTML = steps.length
+    ? steps.map(step => `<tr><td class="data-content">${escapeHtml(step)}</td></tr>`).join("")
+    : "<tr><td class='muted'>No test steps returned.</td></tr>";
+}
+
+async function fetchUatIssue() {
+  const issueKey = normalizeUatIssueKey(el.uatIssueInput.value);
+  if (!issueKey) {
+    showUatError("Enter a Jira issue key first.");
+    return;
+  }
+  el.uatFetchBtn.disabled = true;
+  hideUatError();
+  updateUatStatus("Loading test details...", "");
+  try {
+    const targetUrl = buildUatRequestUrl(issueKey);
+    const response = await fetch(targetUrl, {
+      method: "GET",
+      headers: { "content-type": "application/json" }
+    });
+    if (!response.ok) throw new Error("Server returned error: " + response.status);
+    const data = await response.json().catch(() => ({}));
+    renderUatData(data, issueKey);
+    updateUatStatus(`Loaded UAT details for ${issueKey}.`, "ok");
+  } catch (err) {
+    updateUatStatus(String(err?.message || err), "error");
+    showUatError(String(err?.message || err).includes("fetch") ? "Connection error. Check the UAT API URL in Jira Settings." : String(err?.message || err));
+  } finally {
+    el.uatFetchBtn.disabled = false;
+  }
+}
+
+async function copyUatConfluenceTable() {
+  if (!currentUatData || !currentUatIssueKey) return;
+  const requirements = normalizeUatRequirements(currentUatData.requirements_covered);
+  const steps = normalizeUatSteps(currentUatData.test_steps);
+  const rows = [
+    ["Issue Key", currentUatIssueKey],
+    ["Issue Summary", String(currentUatData.issue_summary || "No Summary")],
+    ["Test Case Name", String(currentUatData.test_case_name || "N/A")],
+    ["Test Purpose", String(currentUatData.test_purpose || "N/A")],
+    ["Requirements Covered", requirements.length ? requirements.join("<br>") : "N/A"],
+    ["Input Test Data", escapeHtml(String(currentUatData.input_test_data || "N/A")).replaceAll("\n", "<br>")],
+    ["Execution Steps", steps.length ? steps.map(step => escapeHtml(step)).join("<br><br>") : "N/A"]
+  ];
+  const html = `<table><thead><tr><th>Field</th><th>Value</th></tr></thead><tbody>${rows.map(([label, value]) => `<tr><td><strong>${escapeHtml(label)}</strong></td><td>${value}</td></tr>`).join("")}</tbody></table>`;
+  const text = rows.map(([label, value]) => `${label}\t${String(value).replaceAll("<br>", " | ").replace(/<[^>]+>/g, "")}`).join("\n");
+  if (navigator.clipboard?.write && typeof ClipboardItem !== "undefined") {
+    const item = new ClipboardItem({
+      "text/html": new Blob([html], { type: "text/html" }),
+      "text/plain": new Blob([text], { type: "text/plain" })
+    });
+    await navigator.clipboard.write([item]);
+  } else {
+    await navigator.clipboard.writeText(text);
+  }
+  updateUatStatus("Confluence table copied.", "ok");
 }
 
 function openPbiCreatorDialog() {
@@ -2560,13 +2749,14 @@ function showJiraContextMenu(issueKey, x, y) {
   hideJiraContextMenu();
   const menu = document.createElement("div");
   menu.className = "jira-context-menu";
-  menu.innerHTML = "<button data-jira-menu='view'>View issue</button><button data-jira-menu='move'>Change status</button><button data-jira-menu='comment'>Add comment</button><button data-jira-menu='todo'>Add to to-do list</button>";
+  menu.innerHTML = "<button data-jira-menu='view'>View issue</button><button data-jira-menu='uat'>UAT test case</button><button data-jira-menu='move'>Change status</button><button data-jira-menu='comment'>Add comment</button><button data-jira-menu='todo'>Add to to-do list</button>";
   menu.style.left = Math.min(x, window.innerWidth - 190) + "px";
   menu.style.top = Math.min(y, window.innerHeight - 180) + "px";
   menu.addEventListener("click", async event => {
     const action = event.target.closest("[data-jira-menu]")?.dataset.jiraMenu;
     hideJiraContextMenu();
     if (action === "view") await viewJiraIssue(issueKey);
+    if (action === "uat") openUatDialog(issueKey);
     if (action === "move") await moveJiraIssue(issueKey);
     if (action === "comment") await commentOnJiraIssue(issueKey);
     if (action === "todo") await addTodoForJira(issueKey);
@@ -2760,6 +2950,15 @@ function wireEvents() {
   });
   el.form.addEventListener("submit", saveEntry);
   el.jiraSettingsForm.addEventListener("submit", saveJiraSettings);
+  el.uatFetchBtn.addEventListener("click", fetchUatIssue);
+  el.uatOpenSettingsBtn.addEventListener("click", openJiraSettingsDialog);
+  el.uatResetBtn.addEventListener("click", resetUatDialog);
+  el.uatCopyBtn.addEventListener("click", copyUatConfluenceTable);
+  el.uatIssueInput.addEventListener("keydown", event => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    fetchUatIssue();
+  });
   el.pbiDynamicForm.addEventListener("change", event => {
     const target = event.target instanceof HTMLElement ? event.target : null;
     if (!(target instanceof HTMLSelectElement) || target.name !== "issueType") return;

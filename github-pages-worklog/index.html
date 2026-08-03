@@ -237,6 +237,9 @@
       <label>PBI Draft API Endpoint
         <input id="f-pbi-draft-url" type="url" placeholder="https://your-power-automate-endpoint">
       </label>
+      <label>UAT API Endpoint
+        <input id="f-uat-api-url" type="url" placeholder="https://your-power-automate-endpoint/{issueKey}">
+      </label>
       <label>Desktop Sync Firebase UID
         <input id="f-desktop-sync-uid" readonly>
       </label>
@@ -302,11 +305,79 @@
     </form>
   </dialog>
 
+  <dialog id="uat-dialog" class="uat-dialog">
+    <form method="dialog" id="uat-dialog-form">
+      <div class="pbi-header">
+        <div>
+          <h2>UAT Dashboard</h2>
+          <p class="muted dialog-copy">Fetch test case details for a Jira issue using the UAT API URL saved in Jira Settings.</p>
+        </div>
+        <div id="uat-status" class="muted"></div>
+      </div>
+      <section id="uat-search-panel" class="card uat-card">
+        <div class="grid2">
+          <label>Jira Issue Key
+            <input id="uat-issue-input" type="text" placeholder="e.g. CPM-6759">
+          </label>
+          <div class="uat-inline-actions">
+            <button id="btn-uat-fetch" type="button" class="btn primary">Fetch Test Details</button>
+            <button id="btn-uat-open-settings" type="button" class="btn">Open Jira Settings</button>
+          </div>
+        </div>
+        <div id="uat-error" class="pbi-status-error" hidden></div>
+      </section>
+      <section id="uat-result-panel" class="card uat-card" hidden>
+        <div class="uat-result-header">
+          <div>
+            <div class="todo-section-label" id="uat-issue-key-label"></div>
+            <h3 id="uat-issue-summary"></h3>
+            <a id="uat-issue-url" href="#" target="_blank" rel="noopener noreferrer">Open in Jira</a>
+          </div>
+          <div class="uat-result-actions">
+            <button id="btn-uat-copy" type="button" class="btn">Copy Confluence Table</button>
+            <button id="btn-uat-reset" type="button" class="btn">New Search</button>
+          </div>
+        </div>
+        <div class="uat-meta-grid">
+          <div>
+            <div class="section-title">Test Case Name</div>
+            <div class="data-content" id="uat-test-case-name"></div>
+          </div>
+          <div>
+            <div class="section-title">Test Purpose</div>
+            <div class="data-content" id="uat-test-purpose"></div>
+          </div>
+          <div class="uat-span-2">
+            <div class="section-title">Requirements Covered</div>
+            <div id="uat-requirements"></div>
+          </div>
+          <div class="uat-span-2">
+            <div class="section-title">Input Test Data</div>
+            <div class="data-content uat-pre" id="uat-input-test-data"></div>
+          </div>
+        </div>
+        <section>
+          <div class="section-title">Execution Steps</div>
+          <table class="uat-table">
+            <thead>
+              <tr>
+                <th>Action / Expected Result</th>
+              </tr>
+            </thead>
+            <tbody id="uat-steps-body"></tbody>
+          </table>
+        </section>
+      </section>
+      <menu>
+        <button type="submit" class="btn">Close</button>
+      </menu>
+    </form>
+  </dialog>
+
   <script src="./config.js"></script>
   <script type="module" src="./app.js"></script>
 </body>
 </html>
-
 
 
 

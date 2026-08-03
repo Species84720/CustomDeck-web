@@ -10,5 +10,6 @@ window.WORKLOG_CONFIG = window.WORKLOG_CONFIG || {
     measurementId: "G-3T01YPHH66"
   },
   jiraWorkerUrl: "https://jira-proxy.juan-mizzi.workers.dev",
-  pbiDraftUrl: ""
+  pbiDraftUrl: "",
+  uatApiUrl: ""
 };

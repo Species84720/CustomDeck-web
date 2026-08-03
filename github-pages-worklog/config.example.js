@@ -8,6 +8,6 @@ window.WORKLOG_CONFIG = {
     appId: "REPLACE_ME"
   },
   jiraWorkerUrl: "https://your-worker.your-subdomain.workers.dev",
-  pbiDraftUrl: ""
+  pbiDraftUrl: "",
+  uatApiUrl: ""
 };
-
