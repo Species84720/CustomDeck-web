@@ -396,6 +396,7 @@ function resetJiraCaches() {
   jiraIssueCache = [];
   jiraIssueTypeByKey = {};
   jiraIssueSummaryByKey = {};
+  jiraIssueLookupPending.clear();
   sprintCache = [];
   updateJiraDropdown();
   refreshSprintSelect();
@@ -1047,7 +1048,7 @@ function normalizeJiraIssue(issue) {
 async function ensureJiraIssueCached(issueKey) {
   const key = String(issueKey || "").trim().toUpperCase();
   if (!key || key === "UNLINKED" || jiraIssueLookupPending.has(key)) return;
-  if (jiraIssueSummaryByKey[key] || !currentUser) return;
+  if (Object.prototype.hasOwnProperty.call(jiraIssueSummaryByKey, key) || !currentUser) return;
   jiraIssueLookupPending.add(key);
   try {
     const data = await jiraWorkerFetch("/jira/issue?key=" + encodeURIComponent(key), { key });
@@ -1055,12 +1056,12 @@ async function ensureJiraIssueCached(issueKey) {
     if (issue.key) {
       jiraIssueSummaryByKey[issue.key] = String(issue.summary || "").trim();
       jiraIssueTypeByKey[issue.key] = String(issue.issuetype || "");
-      if (currentView === "sprint") renderSprintView();
     }
   } catch (_) {
-    // Leave unknown issues without a summary if Jira does not return them.
+    jiraIssueSummaryByKey[key] = "";
   } finally {
     jiraIssueLookupPending.delete(key);
+    if (currentView === "sprint") renderSprintView();
   }
 }
 
@@ -1478,6 +1479,11 @@ function refreshSprintSelect() {
 }
 
 function renderSprintView() {
+  const openIssues = new Set(
+    [...el.sprintView.querySelectorAll("details[data-sprint-issue][open]")]
+      .map(node => node.dataset.sprintIssue)
+      .filter(Boolean)
+  );
   const selection = resolveSprintSelection();
   if (!selection.sprint) {
     el.sprintView.innerHTML = "<div class='muted'>No Jira sprint data available.</div>";
@@ -1503,14 +1509,18 @@ function renderSprintView() {
   const issueHtml = [...byIssue.entries()]
     .sort((a, b) => b[1].length - a[1].length)
     .map(([issue, rows]) => {
-      if (issue !== "UNLINKED" && !jiraIssueSummaryByKey[issue]) ensureJiraIssueCached(issue);
+      if (issue !== "UNLINKED" && !Object.prototype.hasOwnProperty.call(jiraIssueSummaryByKey, issue)) ensureJiraIssueCached(issue);
       const total = rows.reduce((s, e) => s + (e.end ? Math.max(0, mins(e.end) - mins(e.start)) : 0), 0);
       const ot = rows.reduce((s, e) => s + ((e.isOvertime || e.tag === "overtime") && e.end ? Math.max(0, mins(e.end) - mins(e.start)) : 0), 0);
       const allLogged = rows.length > 0 && rows.every(r => !!r.jiraLogged);
       const summary = issue === "UNLINKED" ? "" : String(jiraIssueSummaryByKey[issue] || "").trim();
+      const summaryLabel = issue === "UNLINKED"
+        ? ""
+        : (summary || (jiraIssueLookupPending.has(issue) ? "Loading Jira summary..." : "Summary unavailable"));
       const issueTitle = issue === "UNLINKED"
         ? "<div class='sprint-issue-heading'><span class='badge warn'>Unlinked</span><span class='sprint-issue-summary'>No Jira issue linked</span></div>"
-        : `<div class='sprint-issue-heading'><span class='badge'>${escapeHtml(issue)}</span><span class='sprint-issue-summary'>${escapeHtml(summary || "Loading Jira summary...")}</span></div>`;
+        : `<div class='sprint-issue-heading'><span class='badge'>${escapeHtml(issue)}</span><span class='sprint-issue-summary'>${escapeHtml(summaryLabel)}</span></div>`;
+      const openAttr = openIssues.has(issue) ? " open" : "";
       const rowList = rows
         .sort((a, b) => `${a.date}T${a.start}`.localeCompare(`${b.date}T${b.start}`))
         .map(r => {
@@ -1522,7 +1532,7 @@ function renderSprintView() {
           </div>`;
         }).join("");
       return `<article class='block'>
-        <details>
+        <details data-sprint-issue='${escapeHtml(issue)}'${openAttr}>
           <summary class='head'><div class='task'>${issueTitle}</div><div class='meta'>${rows.length} blocks</div></summary>
           <div class='meta' style='margin-top:8px'>Total: ${durLabel(total)} | OT: ${durLabel(ot)}</div>
           <div class='actions'>
@@ -1548,7 +1558,7 @@ function renderSprintView() {
         </div>`;
       }).join("");
     internalHtml = `<article class='block' style='border-left-color:var(--warn)'>
-      <details open>
+      <details data-sprint-issue='__internal__'${openIssues.has("__internal__") || !openIssues.size ? " open" : ""}>
         <summary class='head'><div class='task'><span class='badge warn'>No Jira / Internal</span></div><div class='meta'>${internalRows.length} blocks</div></summary>
         <div class='meta' style='margin-top:8px'>Total: ${durLabel(total)} | OT: ${durLabel(ot)}</div>
         <div class='actions'><button class='btn' data-action='copy-internal'>Copy Internal Rows</button></div>
