@@ -1549,6 +1549,7 @@ function renderSprintView() {
       if (issue !== "UNLINKED" && !Object.prototype.hasOwnProperty.call(jiraIssueSummaryByKey, issue)) ensureJiraIssueCached(issue);
       const total = rows.reduce((s, e) => s + (e.end ? Math.max(0, mins(e.end) - mins(e.start)) : 0), 0);
       const ot = rows.reduce((s, e) => s + ((e.isOvertime || e.tag === "overtime") && e.end ? Math.max(0, mins(e.end) - mins(e.start)) : 0), 0);
+      const totalPoints = effortPointsLabel(total);
       const allLogged = rows.length > 0 && rows.every(r => !!r.jiraLogged);
       const summary = issue === "UNLINKED" ? "" : String(jiraIssueSummaryByKey[issue] || "").trim();
       const fallbackSummary = issue === "UNLINKED" ? "" : fallbackIssueSummary(issue, rows);
@@ -1562,17 +1563,19 @@ function renderSprintView() {
       const rowList = rows
         .sort((a, b) => `${a.date}T${a.start}`.localeCompare(`${b.date}T${b.start}`))
         .map(r => {
-          const dur = r.end ? durLabel(Math.max(0, mins(r.end) - mins(r.start))) : "Open";
+          const minutes = r.end ? Math.max(0, mins(r.end) - mins(r.start)) : 0;
+          const dur = r.end ? durLabel(minutes) : "Open";
+          const points = effortPointsLabel(minutes);
           return `<div class='meta' style='padding:4px 0;border-top:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-wrap:wrap'>
             <label class='inline' style='font-size:11px'><input type='checkbox' data-action='toggle-row-logged' data-id='${r.id}' ${r.jiraLogged ? "checked" : ""}>Logged</label>
-            <span>${r.date} ${r.start}${r.end ? `-${r.end}` : ""} · ${dur} · ${escapeHtml(r.task)}</span>
+            <span>${r.date} ${r.start}${r.end ? `-${r.end}` : ""} · ${dur}${points ? ` · ${points} pt` : ""} · ${escapeHtml(r.task)}</span>
             <button class='btn' data-action='edit' data-id='${r.id}'>Edit</button>
           </div>`;
         }).join("");
       return `<article class='block'>
         <details data-sprint-issue='${escapeHtml(issue)}'${openAttr}>
           <summary class='head'><div class='task'>${issueTitle}</div><div class='meta'>${rows.length} blocks</div></summary>
-          <div class='meta' style='margin-top:8px'>Total: ${durLabel(total)} | OT: ${durLabel(ot)}</div>
+          <div class='meta' style='margin-top:8px'>Total: ${durLabel(total)}${totalPoints ? ` (${totalPoints} pt)` : ""} | OT: ${durLabel(ot)}</div>
           <div class='actions'>
             <label class='inline'><input type='checkbox' data-action='toggle-issue-logged' data-issue='${issue}' ${allLogged ? "checked" : ""}> Mark all logged</label>
             <button class='btn' data-action='copy-issue' data-issue='${issue}'>Copy Issue Rows</button>
