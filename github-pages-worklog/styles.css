@@ -176,27 +176,33 @@ input:focus, textarea:focus, select:focus {
   padding: 8px 10px;
   background: #0d1422;
 }
-.block .head { display: flex; justify-content: space-between; gap: 8px; }
-.block .task { font-weight: 700; color: #f3f7ff; }
+.block .head { display: flex; justify-content: space-between; gap: 8px; min-width: 0; }
+.block .task { font-weight: 700; color: #f3f7ff; min-width: 0; }
 .block .meta { color: var(--muted); font-size: 12px; }
 .block .actions { display: flex; gap: 6px; margin-top: 6px; }
 .sprint-issue-heading {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  min-width: 0;
 }
 .sprint-issue-summary {
   color: var(--muted);
   font-size: 12px;
   font-weight: 500;
-  flex: 1 1 220px;
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .sprint-issue-effort {
   color: #8fb7ff;
   border-color: #31518b;
   background: #172748;
   font-weight: 700;
+  flex: 0 0 auto;
 }
 .row-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; }
 .week-entry-list { display: grid; gap: 4px; margin-top: 6px; }
