@@ -1077,6 +1077,25 @@ function jiraIssueStatus(issue) {
   return String(status?.name || status?.value || status || "Status unavailable").trim();
 }
 
+function sprintIssueStatusRank(issue) {
+  const status = jiraIssueStatus(issue).trim().toLowerCase();
+  if (status.includes("in progress")) return 0;
+  if (status === "to do" || status.includes("todo")) return 1;
+  if (status.includes("qa testing") || status.includes("qa") || status.includes("testing")) return 2;
+  if (status === "done" || status.includes("done")) return 3;
+  return 4;
+}
+
+function sortedCurrentSprintIssues() {
+  return [...jiraIssueCache].sort((a, b) => {
+    const rankDiff = sprintIssueStatusRank(a) - sprintIssueStatusRank(b);
+    if (rankDiff !== 0) return rankDiff;
+    const statusDiff = jiraIssueStatus(a).localeCompare(jiraIssueStatus(b));
+    if (statusDiff !== 0) return statusDiff;
+    return String(a.key || "").localeCompare(String(b.key || ""));
+  });
+}
+
 function normalizeJiraIssue(issue) {
   const fields = issue?.fields || {};
   return {
@@ -1142,7 +1161,7 @@ function renderCurrentSprintIssues(message = "") {
     el.sprintIssuesList.innerHTML = `<div class="muted">No assigned issues in ${escapeHtml(sprint.name)}.</div>`;
     return;
   }
-  el.sprintIssuesList.innerHTML = jiraIssueCache.map(issue => `
+  el.sprintIssuesList.innerHTML = sortedCurrentSprintIssues().map(issue => `
     <button type="button" class="sprint-issue-item" data-jira-issue="${escapeHtml(issue.key)}" style="--issue-accent:${issueTypeColor({ jiraIssue: issue.key })}">
       <span class="badge">${escapeHtml(issue.key)}</span>
       <span class="sprint-issue-copy"><span>${escapeHtml(issue.summary || "Summary unavailable")}</span><span class="jira-status">${escapeHtml(jiraIssueStatus(issue))}</span></span>
