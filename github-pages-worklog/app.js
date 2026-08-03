@@ -8,7 +8,6 @@ const PBI_ISSUE_TYPE_OPTIONS = [
   "Story",
   "Bug",
   "Task",
-  "Enhancement",
   "Epic",
   "Support",
   "Discovery",
@@ -989,7 +988,7 @@ function normalizePbiIssueType(value) {
   if (exact) return exact;
   const normalized = raw.toLowerCase();
   if (normalized.includes("bug")) return "Bug";
-  if (normalized.includes("enhancement")) return "Enhancement";
+  if (normalized.includes("enhancement")) return "Story";
   if (normalized.includes("story")) return "Story";
   if (normalized.includes("epic")) return "Epic";
   if (normalized.includes("support")) return "Support";
@@ -1008,7 +1007,7 @@ function normalizePbiIssueType(value) {
 function pbiFieldKeysForIssueType(issueType) {
   const normalized = normalizePbiIssueType(issueType).toLowerCase();
   if (normalized === "bug") return ["summary", "description", "module_or_screen", "steps_to_reproduce", "expected_behavior"];
-  if (normalized === "story" || normalized === "enhancement") return ["summary", "description", "actor", "use_case_goal", "acceptance_criteria"];
+  if (normalized === "story") return ["summary", "description", "actor", "use_case_goal", "acceptance_criteria"];
   if (normalized === "task") return ["summary", "description", "outcome"];
   return ["summary", "description"];
 }
