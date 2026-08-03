@@ -2,6 +2,8 @@
   --bg: #0b0f17;
   --card: #121a28;
   --card-2: #0f1726;
+  --panel: #172033;
+  --panel-2: #10192a;
   --border: #243146;
   --text: #e6edf7;
   --muted: #95a4be;
@@ -351,7 +353,7 @@ body { background-color:#080b14; background-image:radial-gradient(circle at 12% 
 @media(max-width:520px){.app{padding:12px}.topbar{align-items:flex-start}.brand p{display:none}.topbar-actions{gap:5px}.section-heading{align-items:flex-end}}
 
 html[data-theme="light"] {
-  --bg:#eef2f8;--card:#ffffff;--card-2:#f7f9fc;--border:#cbd5e1;--text:#182235;--muted:#607089;--accent:#5266dc;
+  --bg:#eef2f8;--card:#ffffff;--card-2:#f7f9fc;--panel:#ffffff;--panel-2:#f5f8fc;--border:#cbd5e1;--text:#182235;--muted:#607089;--accent:#5266dc;
   color-scheme:light;
 }
 html[data-theme="light"] * { scrollbar-color:#9aa9bd #e2e8f0; }
@@ -364,10 +366,14 @@ html[data-theme="light"] input,html[data-theme="light"] textarea,html[data-theme
 html[data-theme="light"] .btn { background:#edf1f7; }
 html[data-theme="light"] .btn.primary,html[data-theme="light"] .tab.active { color:#fff;background:linear-gradient(135deg,#6474e7,#5266dc); }
 html[data-theme="light"] .todo-item,html[data-theme="light"] .sprint-issue-item { background:#f8fafc;border-color:#d3dce8; }
+html[data-theme="light"] .todo-item:hover,html[data-theme="light"] .sprint-issue-item:hover { border-color:#94a3b8; }
+html[data-theme="light"] .todo-item.locked:hover { border-color:#d3dce8; }
 html[data-theme="light"] .todo-count { background:#ebe8ff;border-color:#cbc2ff;color:#5949bb; }
 html[data-theme="light"] .todo-progress { background:#dce3ed; }
 html[data-theme="light"] .jira-status { background:#e1f4fa;border-color:#9ed8e8;color:#17637a; }
 html[data-theme="light"] .day-grid { user-select:none; background:#f7f9fc; }
+html[data-theme="light"] .work-band.normal { background:rgba(34,197,94,.1);border-color:rgba(34,197,94,.25); }
+html[data-theme="light"] .work-band.overtime { background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.3); }
 html[data-theme="light"] .day-block { background:#ffffff; border-color:#cdd8e6; color:var(--text); box-shadow:0 4px 10px #94a3b826; }
 html[data-theme="light"] .day-block.ot { background:#fff7ed; border-color:#f0c89a; }
 html[data-theme="light"] .day-block .task,
@@ -383,6 +389,19 @@ html[data-theme="light"] .month-cell { background:#ffffff; border-color:#d3dce8;
 html[data-theme="light"] .month-cell:hover { border-color:#94a3b8; }
 html[data-theme="light"] .month-day { color:#55657d; }
 html[data-theme="light"] .month-count { color:#182235; }
+html[data-theme="light"] .day-popup { background:linear-gradient(180deg,#ffffff 0%,#f5f8fc 100%);box-shadow:0 16px 45px #64748b26; }
+html[data-theme="light"] dialog { background:linear-gradient(180deg,#ffffff 0%,#f6f9fd 100%);box-shadow:0 20px 60px #64748b30; }
+html[data-theme="light"] .pbi-history,
+html[data-theme="light"] .uat-pre { background:#f8fafc; }
+html[data-theme="light"] .json-display { background:#f7fafc;color:#1f6f43;border-color:#d3dce8; }
+html[data-theme="light"] .uat-result-header h3 { color:#3056c9; }
+html[data-theme="light"] .req-item { background:#edf5ff;color:#1d4ed8;border-color:#bfdbfe; }
+html[data-theme="light"] .uat-table th { background:#eef3f8;color:#55657d; }
+html[data-theme="light"] .jira-context-menu { background:var(--panel);box-shadow:0 12px 30px #64748b2e; }
+html[data-theme="light"] .jira-context-menu button { color:var(--text); }
+html[data-theme="light"] .jira-transition-option { background:var(--panel);box-shadow:none; }
+html[data-theme="light"] .jira-transition-option:hover,
+html[data-theme="light"] .jira-transition-option:focus-visible { background:color-mix(in srgb, var(--accent) 8%, var(--panel)); }
 
 .jira-issue-details { display:grid;gap:10px;max-height:65vh;overflow:auto;min-width:min(620px,80vw); }
 .jira-detail-row { display:grid;gap:3px;padding-bottom:8px;border-bottom:1px solid var(--border); }
