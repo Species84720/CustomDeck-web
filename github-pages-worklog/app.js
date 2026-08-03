@@ -962,6 +962,11 @@ function sprintIssueColor(issueKey) {
   return issueTypeColor({ jiraIssue: key });
 }
 
+function allowBrowserContextMenu(target) {
+  if (!(target instanceof Element)) return false;
+  return !!target.closest("#day-grid") && !target.closest(".day-block, .work-band");
+}
+
 function sortedForDay(day, ignoreId = "") {
   return sortedEntries(allEntries.filter(e => e.date === day && e.id !== ignoreId));
 }
@@ -1138,7 +1143,7 @@ function renderCurrentSprintIssues(message = "") {
     return;
   }
   el.sprintIssuesList.innerHTML = jiraIssueCache.map(issue => `
-    <button type="button" class="sprint-issue-item" data-jira-issue="${escapeHtml(issue.key)}" style="border-left:4px solid ${issueTypeColor({ jiraIssue: issue.key })}">
+    <button type="button" class="sprint-issue-item" data-jira-issue="${escapeHtml(issue.key)}" style="--issue-accent:${issueTypeColor({ jiraIssue: issue.key })}">
       <span class="badge">${escapeHtml(issue.key)}</span>
       <span class="sprint-issue-copy"><span>${escapeHtml(issue.summary || "Summary unavailable")}</span><span class="jira-status">${escapeHtml(jiraIssueStatus(issue))}</span></span>
     </button>`).join("");
@@ -2497,9 +2502,8 @@ function wireEvents() {
 
   document.addEventListener("contextmenu", ev => {
     const target = ev.target instanceof Element ? ev.target : null;
-    if (target?.closest("#day-grid") || Date.now() < suppressContextMenuUntil) {
-      ev.preventDefault();
-    }
+    if (Date.now() < suppressContextMenuUntil) { ev.preventDefault(); return; }
+    if (!allowBrowserContextMenu(target)) ev.preventDefault();
   }, true);
 }
 
