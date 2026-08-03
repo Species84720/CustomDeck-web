@@ -134,6 +134,7 @@ const el = {
   uatIssueKeyLabel: document.getElementById("uat-issue-key-label"),
   uatIssueSummary: document.getElementById("uat-issue-summary"),
   uatIssueUrl: document.getElementById("uat-issue-url"),
+  uatCopyLinkBtn: document.getElementById("btn-uat-copy-link"),
   uatTestCaseName: document.getElementById("uat-test-case-name"),
   uatTestPurpose: document.getElementById("uat-test-purpose"),
   uatRequirements: document.getElementById("uat-requirements"),
@@ -919,6 +920,13 @@ async function copyUatConfluenceTable() {
     await navigator.clipboard.writeText(text);
   }
   updateUatStatus("Confluence table copied.", "ok");
+}
+
+async function copyUatIssueLink() {
+  const issueUrl = String(el.uatIssueUrl?.href || "").trim();
+  if (!issueUrl || issueUrl === "#") return;
+  await navigator.clipboard.writeText(issueUrl);
+  updateUatStatus("Jira link copied.", "ok");
 }
 
 function openPbiCreatorDialog() {
@@ -2978,6 +2986,7 @@ function wireEvents() {
   el.jiraSettingsForm.addEventListener("submit", saveJiraSettings);
   el.uatFetchBtn.addEventListener("click", fetchUatIssue);
   el.uatOpenSettingsBtn.addEventListener("click", openJiraSettingsDialog);
+  el.uatCopyLinkBtn.addEventListener("click", copyUatIssueLink);
   el.uatResetBtn.addEventListener("click", resetUatDialog);
   el.uatCopyBtn.addEventListener("click", copyUatConfluenceTable);
   el.uatIssueInput.addEventListener("keydown", event => {
