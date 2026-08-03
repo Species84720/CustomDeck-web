@@ -109,6 +109,7 @@ let allEntries = [];
 let jiraIssueCache = [];
 let jiraIssueTypeByKey = {};
 let jiraIssueSummaryByKey = {};
+const jiraIssueLookupPending = new Set();
 let jiraIssueEditMeta = {};
 let jiraIssueDraft = null;
 let todoBeingEdited = null;
@@ -1043,6 +1044,26 @@ function normalizeJiraIssue(issue) {
   };
 }
 
+async function ensureJiraIssueCached(issueKey) {
+  const key = String(issueKey || "").trim().toUpperCase();
+  if (!key || key === "UNLINKED" || jiraIssueLookupPending.has(key)) return;
+  if (jiraIssueSummaryByKey[key] || !currentUser) return;
+  jiraIssueLookupPending.add(key);
+  try {
+    const data = await jiraWorkerFetch("/jira/issue?key=" + encodeURIComponent(key), { key });
+    const issue = normalizeJiraIssue(data.issue || { key });
+    if (issue.key) {
+      jiraIssueSummaryByKey[issue.key] = String(issue.summary || "").trim();
+      jiraIssueTypeByKey[issue.key] = String(issue.issuetype || "");
+      if (currentView === "sprint") renderSprintView();
+    }
+  } catch (_) {
+    // Leave unknown issues without a summary if Jira does not return them.
+  } finally {
+    jiraIssueLookupPending.delete(key);
+  }
+}
+
 function currentSprint() {
   return sprintCache.find(s => s.start <= today && s.end >= today) || null;
 }
@@ -1482,13 +1503,14 @@ function renderSprintView() {
   const issueHtml = [...byIssue.entries()]
     .sort((a, b) => b[1].length - a[1].length)
     .map(([issue, rows]) => {
+      if (issue !== "UNLINKED" && !jiraIssueSummaryByKey[issue]) ensureJiraIssueCached(issue);
       const total = rows.reduce((s, e) => s + (e.end ? Math.max(0, mins(e.end) - mins(e.start)) : 0), 0);
       const ot = rows.reduce((s, e) => s + ((e.isOvertime || e.tag === "overtime") && e.end ? Math.max(0, mins(e.end) - mins(e.start)) : 0), 0);
       const allLogged = rows.length > 0 && rows.every(r => !!r.jiraLogged);
       const summary = issue === "UNLINKED" ? "" : String(jiraIssueSummaryByKey[issue] || "").trim();
       const issueTitle = issue === "UNLINKED"
         ? "<div class='sprint-issue-heading'><span class='badge warn'>Unlinked</span><span class='sprint-issue-summary'>No Jira issue linked</span></div>"
-        : `<div class='sprint-issue-heading'><span class='badge'>${escapeHtml(issue)}</span><span class='sprint-issue-summary'>${escapeHtml(summary || "Summary unavailable")}</span></div>`;
+        : `<div class='sprint-issue-heading'><span class='badge'>${escapeHtml(issue)}</span><span class='sprint-issue-summary'>${escapeHtml(summary || "Loading Jira summary...")}</span></div>`;
       const rowList = rows
         .sort((a, b) => `${a.date}T${a.start}`.localeCompare(`${b.date}T${b.start}`))
         .map(r => {
@@ -1783,6 +1805,7 @@ async function saveEntry(evt) {
   if (error) return alert(error);
   const id = rawId || `${entry.date.replaceAll("-", "")}${entry.start.replaceAll(":", "")}_${crypto.randomUUID().slice(0, 8)}`;
   await setDoc(doc(db, `users/${currentUser.uid}/entries/${id}`), entry, { merge: true });
+  if (entry.jiraIssue && !entry.noJira) ensureJiraIssueCached(entry.jiraIssue);
   el.dialog.close();
   await loadEntries();
 }
