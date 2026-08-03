@@ -1045,6 +1045,20 @@ function normalizeJiraIssue(issue) {
   };
 }
 
+function fallbackIssueSummary(issueKey, rows = []) {
+  const key = String(issueKey || "").trim().toUpperCase();
+  for (const row of rows) {
+    const task = String(row?.task || "").trim();
+    if (!task) continue;
+    const normalizedTask = task.toUpperCase();
+    if (normalizedTask === key) continue;
+    const prefixMatch = task.match(new RegExp(`^${key}\\s*[:\\-]\\s*(.+)$`, "i"));
+    if (prefixMatch?.[1]?.trim()) return prefixMatch[1].trim();
+    return task;
+  }
+  return "";
+}
+
 async function ensureJiraIssueCached(issueKey) {
   const key = String(issueKey || "").trim().toUpperCase();
   if (!key || key === "UNLINKED" || jiraIssueLookupPending.has(key)) return;
@@ -1514,9 +1528,10 @@ function renderSprintView() {
       const ot = rows.reduce((s, e) => s + ((e.isOvertime || e.tag === "overtime") && e.end ? Math.max(0, mins(e.end) - mins(e.start)) : 0), 0);
       const allLogged = rows.length > 0 && rows.every(r => !!r.jiraLogged);
       const summary = issue === "UNLINKED" ? "" : String(jiraIssueSummaryByKey[issue] || "").trim();
+      const fallbackSummary = issue === "UNLINKED" ? "" : fallbackIssueSummary(issue, rows);
       const summaryLabel = issue === "UNLINKED"
         ? ""
-        : (summary || (jiraIssueLookupPending.has(issue) ? "Loading Jira summary..." : "Summary unavailable"));
+        : (summary || fallbackSummary || (jiraIssueLookupPending.has(issue) ? "Loading Jira summary..." : "Summary unavailable"));
       const issueTitle = issue === "UNLINKED"
         ? "<div class='sprint-issue-heading'><span class='badge warn'>Unlinked</span><span class='sprint-issue-summary'>No Jira issue linked</span></div>"
         : `<div class='sprint-issue-heading'><span class='badge'>${escapeHtml(issue)}</span><span class='sprint-issue-summary'>${escapeHtml(summaryLabel)}</span></div>`;
@@ -2207,7 +2222,8 @@ async function fetchJiraSprints() {
 function copyIssueRows(issueKey) {
   const rows = selectedSprintEntries().filter(e => (e.jiraIssue || "UNLINKED").trim().toUpperCase() === issueKey);
   if (!rows.length) return;
-  const out = [["Date", "Start", "End", "Duration", "Type", "Jira", "Task", "Note"].join("\t")];
+  const headers = ["Date", "Start", "End", "Duration", "Type", "Jira", "Task", "Note"];
+  const out = [];
   rows.forEach(e => {
     out.push([
       e.date,
@@ -2218,9 +2234,9 @@ function copyIssueRows(issueKey) {
       e.jiraIssue || "",
       e.task || "",
       (e.note || "").replaceAll("\n", " ")
-    ].join("\t"));
+    ]);
   });
-  navigator.clipboard.writeText(out.join("\n")).then(() => alert(`Copied ${rows.length} rows for ${issueKey}.`));
+  writeTableClipboard(headers, out).then(() => alert(`Copied ${rows.length} rows for ${issueKey}.`));
 }
 
 function copyInternalRows() {
@@ -2241,12 +2257,26 @@ function copyInternalRows() {
   navigator.clipboard.writeText(out.join("\n")).then(() => alert(`Copied ${rows.length} internal row(s).`));
 }
 
+async function writeTableClipboard(headers, rows) {
+  const textRows = [headers, ...rows].map(row => row.join("\t")).join("\n");
+  const htmlRows = rows.map(row => `<tr>${row.map(cell => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("");
+  const html = `<table><thead><tr>${headers.map(header => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead><tbody>${htmlRows}</tbody></table>`;
+  if (navigator.clipboard?.write && typeof ClipboardItem !== "undefined") {
+    const item = new ClipboardItem({
+      "text/plain": new Blob([textRows], { type: "text/plain" }),
+      "text/html": new Blob([html], { type: "text/html" })
+    });
+    await navigator.clipboard.write([item]);
+    return;
+  }
+  await navigator.clipboard.writeText(textRows);
+}
+
 function copyExcelRows() {
   const monthPrefix = String(el.dayPicker.value || today).slice(0, 7);
   const rows = sortedEntries(allEntries.filter(e => String(e.date || "").startsWith(monthPrefix) && !!e.end && (!!e.isOvertime || e.tag === "overtime")));
   if (!rows.length) return alert("No overtime rows found for the selected month.");
-  const header = ["Date", "Location", "From", "To"];
-  const out = [header.join("\t")];
+  const out = [];
   rows.forEach(e => {
     out.push([formatExportDate(e.date), locationLabel(e.location), e.start, e.end || ""].join("\t"));
   });
