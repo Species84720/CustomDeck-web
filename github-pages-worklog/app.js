@@ -2128,10 +2128,12 @@ function renderSprintView() {
     return;
   }
   const entries = selectedSprintEntries();
+  const sprintTotalMinutes = entries.reduce((sum, entry) => sum + (entry.end ? Math.max(0, mins(entry.end) - mins(entry.start)) : 0), 0);
+  const sprintTotalPoints = effortPointsLabel(sprintTotalMinutes);
   const selectionLabel = selection.mode === "manual"
     ? "Manual selection"
     : (selection.mode === "auto-date" ? `Auto matched ${selection.anchorDate}` : `Auto fallback from ${selection.anchorDate}`);
-  const sprintHeader = `<article class='block' style='border-left-color:var(--ok)'><div class='head'><div class='task'>${escapeHtml(selection.sprint.name)}</div><div class='meta'>${selection.sprint.start} → ${selection.sprint.end}</div></div><div class='meta' style='margin-top:6px'>${selectionLabel}</div></article>`;
+  const sprintHeader = `<article class='block' style='border-left-color:var(--ok)'><div class='head'><div class='task'>${escapeHtml(selection.sprint.name)}</div><div class='meta'>${selection.sprint.start} → ${selection.sprint.end}</div></div><div class='meta' style='margin-top:6px'>${selectionLabel}</div><div class='meta' style='margin-top:6px'>Sprint total: ${durLabel(sprintTotalMinutes)}${sprintTotalPoints ? ` (${sprintTotalPoints} pt)` : ""}</div></article>`;
   if (!entries.length) {
     el.sprintView.innerHTML = `${sprintHeader}<div class='muted'>No sprint data for this selection.</div>`;
     return;
@@ -2157,9 +2159,10 @@ function renderSprintView() {
       const summaryLabel = issue === "UNLINKED"
         ? ""
         : (summary || fallbackSummary || (jiraIssueLookupPending.has(issue) ? "Loading Jira summary..." : "Summary unavailable"));
+      const issueEffortLabel = totalPoints ? `${totalPoints} pt` : "";
       const issueTitle = issue === "UNLINKED"
-        ? "<div class='sprint-issue-heading'><span class='badge warn'>Unlinked</span><span class='sprint-issue-summary'>No Jira issue linked</span></div>"
-        : `<div class='sprint-issue-heading' data-jira-issue='${escapeHtml(issue)}'><span class='badge'>${escapeHtml(issue)}</span><span class='sprint-issue-summary'>${escapeHtml(summaryLabel)}</span></div>`;
+        ? `<div class='sprint-issue-heading'><span class='badge warn'>Unlinked</span><span class='sprint-issue-summary'>No Jira issue linked</span>${issueEffortLabel ? `<span class='badge sprint-issue-effort'>${escapeHtml(issueEffortLabel)}</span>` : ""}</div>`
+        : `<div class='sprint-issue-heading' data-jira-issue='${escapeHtml(issue)}'><span class='badge'>${escapeHtml(issue)}</span><span class='sprint-issue-summary'>${escapeHtml(summaryLabel)}</span>${issueEffortLabel ? `<span class='badge sprint-issue-effort'>${escapeHtml(issueEffortLabel)}</span>` : ""}</div>`;
       const openAttr = openIssues.has(issue) ? " open" : "";
       const cardClasses = `block sprint-issue-card${allLogged ? " is-fully-logged" : ""}`;
       const borderColor = sprintIssueColor(issue);
