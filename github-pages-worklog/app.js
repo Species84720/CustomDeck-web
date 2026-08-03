@@ -1578,7 +1578,7 @@ function renderSprintView() {
         : (summary || fallbackSummary || (jiraIssueLookupPending.has(issue) ? "Loading Jira summary..." : "Summary unavailable"));
       const issueTitle = issue === "UNLINKED"
         ? "<div class='sprint-issue-heading'><span class='badge warn'>Unlinked</span><span class='sprint-issue-summary'>No Jira issue linked</span></div>"
-        : `<div class='sprint-issue-heading'><span class='badge'>${escapeHtml(issue)}</span><span class='sprint-issue-summary'>${escapeHtml(summaryLabel)}</span></div>`;
+        : `<div class='sprint-issue-heading' data-jira-issue='${escapeHtml(issue)}'><span class='badge'>${escapeHtml(issue)}</span><span class='sprint-issue-summary'>${escapeHtml(summaryLabel)}</span></div>`;
       const openAttr = openIssues.has(issue) ? " open" : "";
       const cardClasses = `block sprint-issue-card${allLogged ? " is-fully-logged" : ""}`;
       const borderColor = sprintIssueColor(issue);
@@ -2414,6 +2414,13 @@ function wireEvents() {
   });
   el.sprintIssuesList.addEventListener("contextmenu", event => {
     const issue = event.target.closest("[data-jira-issue]")?.dataset.jiraIssue;
+    if (!issue) return;
+    event.preventDefault();
+    event.stopPropagation();
+    showJiraContextMenu(issue, event.clientX, event.clientY);
+  });
+  el.sprintView.addEventListener("contextmenu", event => {
+    const issue = event.target.closest(".sprint-issue-heading[data-jira-issue]")?.dataset.jiraIssue;
     if (!issue) return;
     event.preventDefault();
     event.stopPropagation();
