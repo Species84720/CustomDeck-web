@@ -699,6 +699,31 @@ function getUatApiUrl(settings = userJiraSettings) {
   return String(settings?.uatApiUrl || cfg.uatApiUrl || "").trim();
 }
 
+function isAzureAiDraftEndpoint(url) {
+  const host = String(url?.hostname || "").toLowerCase();
+  const path = String(url?.pathname || "").toLowerCase();
+  return host.endsWith(".openai.azure.com")
+    || host.endsWith(".services.ai.azure.com")
+    || host.endsWith(".cognitiveservices.azure.com")
+    || path.includes("/openai/")
+    || path.includes("/models");
+}
+
+function buildPbiDraftRequestUrl() {
+  const targetUrl = getPbiDraftUrl();
+  if (!targetUrl) throw new Error("Open Jira Settings and save the PBI Draft API endpoint first.");
+  let parsed;
+  try {
+    parsed = new URL(targetUrl);
+  } catch (_) {
+    return targetUrl;
+  }
+  if (isAzureAiDraftEndpoint(parsed) && !parsed.searchParams.has("api-version")) {
+    parsed.searchParams.set("api-version", "2024-10-01");
+  }
+  return parsed.toString();
+}
+
 function getPbiHistory() {
   try {
     const stored = JSON.parse(localStorage.getItem(PBI_HISTORY_STORAGE_KEY) || "[]");
@@ -908,8 +933,7 @@ function openPbiCreatorDialog() {
 }
 
 async function fetchPbiDraft(payloadObject) {
-  const targetUrl = getPbiDraftUrl();
-  if (!targetUrl) throw new Error("Open Jira Settings and save the PBI Draft API endpoint first.");
+  const targetUrl = buildPbiDraftRequestUrl();
   el.pbiDebugRequest.textContent = JSON.stringify(payloadObject, null, 2);
   el.pbiDebugResponse.textContent = `Sending to: ${targetUrl} ...`;
   const response = await fetch(targetUrl, {
