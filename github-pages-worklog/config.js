@@ -9,6 +9,6 @@ window.WORKLOG_CONFIG = window.WORKLOG_CONFIG || {
     appId: "1:886923718209:web:6584eb6388023657cbe0c0",
     measurementId: "G-3T01YPHH66"
   },
-  jiraWorkerUrl: "https://jira-proxy.juan-mizzi.workers.dev"
+  jiraWorkerUrl: "https://jira-proxy.juan-mizzi.workers.dev",
+  pbiDraftUrl: ""
 };
-

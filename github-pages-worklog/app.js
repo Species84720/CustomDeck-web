@@ -4,16 +4,34 @@ import { getFirestore, collection, doc, getDoc, getDocs, setDoc, deleteDoc, writ
 
 const cfg = window.WORKLOG_CONFIG || {};
 const TAGS = ["task", "story", "bug", "meeting", "support", "working-hours", "overtime", "other"];
+const PBI_ISSUE_TYPE_OPTIONS = [
+  "Story",
+  "Bug",
+  "Task",
+  "Enhancement",
+  "Epic",
+  "Support",
+  "Discovery",
+  "Kaizen",
+  "Planning",
+  "SRE Task",
+  "Marval Call",
+  "Technical Governance",
+  "Impediment",
+  "Buffer"
+];
 const DAY_GRID_HEIGHT = 900;
 const DAY_START_MINUTES = 5 * 60;
 const DAY_END_DEFAULT_MINUTES = 16 * 60;
 const JIRA_REMEMBERED_PASSPHRASE_STORAGE_KEY = "worklog-jira-passphrase-v1";
+const PBI_HISTORY_STORAGE_KEY = "worklog-pbi-history-v1";
 const THEME_STORAGE_KEY = "worklog-theme";
 
 const el = {
   importBtn: document.getElementById("btn-import"),
   themeBtn: document.getElementById("btn-theme"),
   importFile: document.getElementById("import-file"),
+  pbiCreatorBtn: document.getElementById("btn-pbi-creator"),
   jiraSettingsBtn: document.getElementById("btn-jira-settings"),
   login: document.getElementById("btn-login"),
   logout: document.getElementById("btn-logout"),
@@ -87,12 +105,24 @@ const el = {
   jiraProject: document.getElementById("f-jira-project"),
   jiraEmail: document.getElementById("f-jira-email"),
   jiraApiToken: document.getElementById("f-jira-api-token"),
+  jiraPbiDraftUrl: document.getElementById("f-pbi-draft-url"),
   desktopSyncUid: document.getElementById("f-desktop-sync-uid"),
   jiraPassphrase: document.getElementById("f-jira-passphrase"),
   jiraPassphraseConfirm: document.getElementById("f-jira-passphrase-confirm"),
   jiraRememberPassphrase: document.getElementById("f-jira-remember-passphrase"),
   jiraSettingsClear: document.getElementById("btn-jira-settings-clear"),
   jiraSettingsCancel: document.getElementById("btn-jira-settings-cancel"),
+  pbiDialog: document.getElementById("pbi-dialog"),
+  pbiStatus: document.getElementById("pbi-status"),
+  pbiHistoryList: document.getElementById("pbi-history-list"),
+  pbiInput: document.getElementById("pbi-initial-input"),
+  pbiAnalyzeBtn: document.getElementById("btn-pbi-analyze"),
+  pbiClassification: document.getElementById("pbi-classification"),
+  pbiEditorSection: document.getElementById("pbi-editor-section"),
+  pbiDynamicForm: document.getElementById("pbi-dynamic-form"),
+  pbiSubmitBtn: document.getElementById("btn-pbi-submit"),
+  pbiDebugRequest: document.getElementById("pbi-debug-request"),
+  pbiDebugResponse: document.getElementById("pbi-debug-response"),
   deleteBtn: document.getElementById("btn-delete"),
   cancelBtn: document.getElementById("btn-cancel")
 };
@@ -116,6 +146,9 @@ let todoBeingEdited = null;
 let sprintCache = [];
 let userJiraSettings = emptyJiraSettings();
 let jiraUnlockSource = "";
+let currentPbiClassification = "";
+let currentPbiIssueType = "";
+let currentPbiDraftFields = null;
 let currentView = "day";
 let dragState = null;
 let suppressContextMenuUntil = 0;
@@ -160,7 +193,7 @@ function locationLabel(value) {
 }
 
 function emptyJiraSettings() {
-  return { baseUrl: "", project: "", email: "", apiToken: "", encryptedApiToken: null };
+  return { baseUrl: "", project: "", email: "", apiToken: "", encryptedApiToken: null, pbiDraftUrl: String(cfg.pbiDraftUrl || "").trim() };
 }
 
 function bytesToBase64(bytes) {
@@ -269,7 +302,8 @@ function normalizeJiraSettings(raw) {
     project: String(raw?.project || raw?.jiraProject || "").trim().toUpperCase(),
     email: String(raw?.email || raw?.jiraEmail || "").trim(),
     apiToken: String(raw?.apiToken || raw?.jiraApiToken || "").trim(),
-    encryptedApiToken
+    encryptedApiToken,
+    pbiDraftUrl: String(raw?.pbiDraftUrl || cfg.pbiDraftUrl || "").trim()
   };
 }
 
@@ -408,6 +442,7 @@ function fillJiraSettingsForm() {
   el.jiraProject.value = settings.project;
   el.jiraEmail.value = settings.email;
   el.jiraApiToken.value = "";
+  el.jiraPbiDraftUrl.value = settings.pbiDraftUrl || "";
   el.desktopSyncUid.value = currentUser?.uid || "";
   el.jiraPassphrase.value = "";
   el.jiraPassphraseConfirm.value = "";
@@ -490,6 +525,7 @@ async function saveJiraSettings(evt) {
       baseUrl: el.jiraBaseUrl.value,
       project: el.jiraProject.value,
       email: el.jiraEmail.value,
+      pbiDraftUrl: el.jiraPbiDraftUrl.value,
       apiToken: userJiraSettings.apiToken,
       encryptedApiToken: userJiraSettings.encryptedApiToken
     });
@@ -550,6 +586,7 @@ async function saveJiraSettings(evt) {
       baseUrl: baseSettings.baseUrl,
       project: baseSettings.project,
       email: baseSettings.email,
+      pbiDraftUrl: baseSettings.pbiDraftUrl,
       encryptedApiToken,
       updatedAt: serverTimestamp()
     });
@@ -619,6 +656,319 @@ async function jiraWorkerFetch(path, extra = {}) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(String(data?.error || `HTTP ${response.status}`));
   return data;
+}
+
+function getPbiDraftUrl(settings = userJiraSettings) {
+  return String(settings?.pbiDraftUrl || cfg.pbiDraftUrl || "").trim();
+}
+
+function getPbiHistory() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(PBI_HISTORY_STORAGE_KEY) || "[]");
+    return Array.isArray(stored) ? stored.map(item => String(item || "").trim()).filter(Boolean) : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function renderPbiHistory() {
+  if (!el.pbiHistoryList) return;
+  const history = getPbiHistory();
+  if (!history.length) {
+    el.pbiHistoryList.innerHTML = '<div class="pbi-history-empty">No history yet.</div>';
+    return;
+  }
+  const items = history.map(text => `<button type="button" class="btn pbi-history-item" data-pbi-history-text="${escapeHtml(text)}" title="${escapeHtml(text)}">${escapeHtml(text.length > 120 ? `${text.slice(0, 120)}...` : text)}</button>`).join("");
+  el.pbiHistoryList.innerHTML = `${items}<button type="button" class="btn danger pbi-history-item" data-pbi-history-clear="1">Clear History</button>`;
+}
+
+function addPbiHistory(text) {
+  const value = String(text || "").trim();
+  if (!value) return;
+  const history = getPbiHistory().filter(item => item !== value);
+  history.unshift(value);
+  localStorage.setItem(PBI_HISTORY_STORAGE_KEY, JSON.stringify(history.slice(0, 10)));
+  renderPbiHistory();
+}
+
+function updatePbiStatus(message = "", kind = "") {
+  if (!el.pbiStatus) return;
+  el.pbiStatus.textContent = message;
+  el.pbiStatus.classList.toggle("pbi-status-ok", kind === "ok");
+  el.pbiStatus.classList.toggle("pbi-status-error", kind === "error");
+}
+
+function resetPbiDraftEditor() {
+  currentPbiClassification = "";
+  currentPbiIssueType = "";
+  currentPbiDraftFields = null;
+  el.pbiClassification.textContent = "";
+  el.pbiClassification.hidden = true;
+  el.pbiEditorSection.hidden = true;
+  el.pbiDynamicForm.innerHTML = "";
+}
+
+function openPbiCreatorDialog() {
+  renderPbiHistory();
+  if (!el.pbiInput.value.trim()) el.pbiInput.value = "";
+  if (!currentPbiDraftFields) resetPbiDraftEditor();
+  updatePbiStatus(getPbiDraftUrl()
+    ? "Draft endpoint loaded from Jira Settings."
+    : "Open Jira Settings and add the PBI Draft API endpoint before generating a draft.");
+  el.pbiDialog.showModal();
+}
+
+async function fetchPbiDraft(payloadObject) {
+  const targetUrl = getPbiDraftUrl();
+  if (!targetUrl) throw new Error("Open Jira Settings and save the PBI Draft API endpoint first.");
+  el.pbiDebugRequest.textContent = JSON.stringify(payloadObject, null, 2);
+  el.pbiDebugResponse.textContent = `Sending to: ${targetUrl} ...`;
+  const response = await fetch(targetUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payloadObject)
+  });
+  const rawText = await response.text();
+  let data = null;
+  try {
+    data = rawText ? JSON.parse(rawText) : {};
+  } catch (_) {
+    data = { rawText };
+  }
+  el.pbiDebugResponse.textContent = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+  if (!response.ok) {
+    throw new Error(String(data?.error || data?.message || rawText || `HTTP ${response.status}`));
+  }
+  return data;
+}
+
+function coercePbiDraftFields(raw) {
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) return raw;
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+    } catch (_) {
+      return { summary: "", description: raw };
+    }
+  }
+  return { summary: "", description: "" };
+}
+
+function extractPbiDraftFields(responseData) {
+  const jsonCode = responseData?.JSONCode;
+  if (jsonCode !== undefined && jsonCode !== null && jsonCode !== "") {
+    return coercePbiDraftFields(jsonCode);
+  }
+  if (responseData?.fields && typeof responseData.fields === "object" && !Array.isArray(responseData.fields)) {
+    return coercePbiDraftFields(responseData.fields);
+  }
+  return {
+    summary: String(responseData?.summary || "").trim(),
+    description: String(responseData?.description || responseData?.body || responseData?.rawText || "").trim()
+  };
+}
+
+function normalizePbiIssueType(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const exact = PBI_ISSUE_TYPE_OPTIONS.find(option => option.toLowerCase() === raw.toLowerCase());
+  if (exact) return exact;
+  const normalized = raw.toLowerCase();
+  if (normalized.includes("bug")) return "Bug";
+  if (normalized.includes("enhancement")) return "Enhancement";
+  if (normalized.includes("story")) return "Story";
+  if (normalized.includes("epic")) return "Epic";
+  if (normalized.includes("support")) return "Support";
+  if (normalized.includes("discovery")) return "Discovery";
+  if (normalized.includes("kaizen")) return "Kaizen";
+  if (normalized.includes("planning")) return "Planning";
+  if (normalized.includes("sre task")) return "SRE Task";
+  if (normalized.includes("marval call")) return "Marval Call";
+  if (normalized.includes("technical governance")) return "Technical Governance";
+  if (normalized.includes("impediment")) return "Impediment";
+  if (normalized.includes("buffer")) return "Buffer";
+  if (normalized.includes("task")) return "Task";
+  return raw;
+}
+
+function pbiFieldKeysForIssueType(issueType) {
+  const normalized = normalizePbiIssueType(issueType).toLowerCase();
+  if (normalized === "bug") return ["summary", "description", "module_or_screen", "steps_to_reproduce", "expected_behavior"];
+  if (normalized === "story" || normalized === "enhancement") return ["summary", "description", "actor", "use_case_goal", "acceptance_criteria"];
+  if (normalized === "task") return ["summary", "description", "outcome"];
+  return ["summary", "description"];
+}
+
+function buildPbiIssueTypeSelect(selectedIssueType) {
+  const wrap = document.createElement("label");
+  wrap.className = "pbi-field";
+  wrap.textContent = "Issue Type";
+  const select = document.createElement("select");
+  select.name = "issueType";
+  select.className = "form-control";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Choose issue type";
+  select.appendChild(placeholder);
+  PBI_ISSUE_TYPE_OPTIONS.forEach(option => {
+    const item = document.createElement("option");
+    item.value = option;
+    item.textContent = option;
+    if (option === selectedIssueType) item.selected = true;
+    select.appendChild(item);
+  });
+  wrap.appendChild(select);
+  return wrap;
+}
+
+function pbiFieldLabel(key) {
+  return String(key || "").replace(/_/g, " ").replace(/\b\w/g, char => char.toUpperCase());
+}
+
+function createPbiField(key, value) {
+  const wrap = document.createElement("label");
+  wrap.className = "pbi-field";
+  wrap.textContent = pbiFieldLabel(key);
+  const useTextarea = Array.isArray(value) || typeof value === "object" || String(value || "").includes("\n") || String(value || "").length > 160 || key === "description" || key === "steps_to_reproduce" || key === "expected_behavior" || key === "acceptance_criteria" || key === "outcome";
+  const input = document.createElement(useTextarea ? "textarea" : "input");
+  input.name = key;
+  input.className = "form-control";
+  if (useTextarea) {
+    input.rows = Array.isArray(value) ? Math.min(Math.max(value.length + 1, 4), 8) : 4;
+    input.value = Array.isArray(value)
+      ? value.join("\n")
+      : (typeof value === "object" && value !== null ? JSON.stringify(value, null, 2) : String(value || ""));
+    if (Array.isArray(value)) input.dataset.pbiArrayLines = "1";
+    if (typeof value === "object" && value !== null && !Array.isArray(value)) input.dataset.pbiJsonObject = "1";
+  } else {
+    input.type = "text";
+    input.value = String(value || "");
+  }
+  wrap.appendChild(input);
+  return wrap;
+}
+
+function snapshotPbiVisibleFields() {
+  if (!currentPbiDraftFields) return;
+  const values = collectPbiDraftValues();
+  delete values.issueType;
+  currentPbiDraftFields = { ...currentPbiDraftFields, ...values };
+}
+
+function renderPbiDraftForm() {
+  const values = coercePbiDraftFields(currentPbiDraftFields);
+  const selectedIssueType = normalizePbiIssueType(currentPbiIssueType || currentPbiClassification);
+  currentPbiIssueType = selectedIssueType;
+  const orderedKeys = pbiFieldKeysForIssueType(selectedIssueType);
+  el.pbiDynamicForm.innerHTML = "";
+  el.pbiDynamicForm.appendChild(buildPbiIssueTypeSelect(selectedIssueType));
+  orderedKeys.forEach(key => el.pbiDynamicForm.appendChild(createPbiField(key, values[key])));
+  currentPbiDraftFields = values;
+  el.pbiClassification.textContent = currentPbiClassification ? `AI: ${currentPbiClassification}` : "AI draft ready";
+  el.pbiClassification.hidden = !currentPbiClassification;
+  el.pbiEditorSection.hidden = false;
+}
+
+function collectPbiDraftValues() {
+  const values = {};
+  el.pbiDynamicForm.querySelectorAll("[name]").forEach(field => {
+    if (!(field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement || field instanceof HTMLSelectElement)) return;
+    const key = String(field.name || "").trim();
+    if (!key) return;
+    const raw = String(field.value || "").trim();
+    if (field.dataset.pbiArrayLines === "1") {
+      values[key] = raw.split(/\r?\n/).map(item => item.trim()).filter(Boolean);
+      return;
+    }
+    if (field.dataset.pbiJsonObject === "1") {
+      if (!raw) {
+        values[key] = {};
+        return;
+      }
+      try {
+        values[key] = JSON.parse(raw);
+      } catch (_) {
+        values[key] = raw;
+      }
+      return;
+    }
+    values[key] = raw;
+  });
+  return values;
+}
+
+async function analyzePbiDraft() {
+  const description = String(el.pbiInput.value || "").trim();
+  if (!description) {
+    alert("Enter a description first.");
+    return;
+  }
+  el.pbiAnalyzeBtn.disabled = true;
+  el.pbiAnalyzeBtn.textContent = "Analyzing...";
+  updatePbiStatus("Generating draft...", "");
+  try {
+    addPbiHistory(description);
+    const responseData = await fetchPbiDraft({ body: description, accept: false });
+    currentPbiClassification = String(responseData?.classification || responseData?.type || "").trim();
+    currentPbiIssueType = normalizePbiIssueType(currentPbiClassification);
+    currentPbiDraftFields = extractPbiDraftFields(responseData);
+    renderPbiDraftForm();
+    updatePbiStatus(currentPbiIssueType
+      ? `Draft ready. Suggested issue type: ${currentPbiIssueType}.`
+      : "Draft ready. Choose the issue type before creating the ticket.", "ok");
+  } catch (err) {
+    resetPbiDraftEditor();
+    updatePbiStatus(String(err?.message || err), "error");
+  } finally {
+    el.pbiAnalyzeBtn.disabled = false;
+    el.pbiAnalyzeBtn.textContent = "Analyze & Generate Draft";
+  }
+}
+
+async function submitPbiDraft() {
+  if (!currentPbiClassification) {
+    if (!currentPbiDraftFields) {
+      alert("Generate a draft first.");
+      return;
+    }
+  }
+  snapshotPbiVisibleFields();
+  const issueType = normalizePbiIssueType(el.pbiDynamicForm.querySelector('[name="issueType"]')?.value || currentPbiIssueType);
+  if (!issueType) {
+    alert("Choose the Jira issue type first.");
+    return;
+  }
+  const fields = collectPbiDraftValues();
+  delete fields.issueType;
+  if (!String(fields.summary || "").trim()) {
+    alert("Summary is required.");
+    return;
+  }
+  el.pbiSubmitBtn.disabled = true;
+  el.pbiSubmitBtn.textContent = "Creating...";
+  currentPbiIssueType = issueType;
+  currentPbiDraftFields = { ...currentPbiDraftFields, ...fields };
+  const requestPayload = {
+    body: String(el.pbiInput.value || "").trim(),
+    classification: currentPbiClassification,
+    issueType,
+    fields: currentPbiDraftFields
+  };
+  el.pbiDebugRequest.textContent = JSON.stringify(requestPayload, null, 2);
+  el.pbiDebugResponse.textContent = "Creating Jira issue through worker...";
+  updatePbiStatus("Creating Jira issue...", "");
+  try {
+    const result = await jiraWorkerFetch("/jira/pbi-create", requestPayload);
+    el.pbiDebugResponse.textContent = JSON.stringify(result, null, 2);
+    updatePbiStatus(result?.key ? `Created ${result.key}.` : "Ticket created.", "ok");
+  } catch (err) {
+    el.pbiDebugResponse.textContent = JSON.stringify({ error: String(err?.message || err) }, null, 2);
+    updatePbiStatus(String(err?.message || err), "error");
+  } finally {
+    el.pbiSubmitBtn.disabled = false;
+    el.pbiSubmitBtn.textContent = "Confirm & Create Ticket";
+  }
 }
 
 function formatExportDate(ds) {
@@ -2372,6 +2722,7 @@ function wireEvents() {
     localStorage.setItem(THEME_STORAGE_KEY, next);
     updateThemeButton();
   });
+  el.pbiCreatorBtn.addEventListener("click", openPbiCreatorDialog);
   el.importBtn.addEventListener("click", () => el.importFile.click());
   el.importFile.addEventListener("change", async () => handleImportFile(el.importFile.files && el.importFile.files[0]));
   el.jiraSettingsBtn.addEventListener("click", openJiraSettingsDialog);
@@ -2409,6 +2760,27 @@ function wireEvents() {
   });
   el.form.addEventListener("submit", saveEntry);
   el.jiraSettingsForm.addEventListener("submit", saveJiraSettings);
+  el.pbiDynamicForm.addEventListener("change", event => {
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    if (!(target instanceof HTMLSelectElement) || target.name !== "issueType") return;
+    snapshotPbiVisibleFields();
+    currentPbiIssueType = normalizePbiIssueType(target.value);
+    renderPbiDraftForm();
+  });
+  el.pbiAnalyzeBtn.addEventListener("click", analyzePbiDraft);
+  el.pbiSubmitBtn.addEventListener("click", submitPbiDraft);
+  el.pbiHistoryList.addEventListener("click", event => {
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    const clear = target?.closest("[data-pbi-history-clear]");
+    if (clear) {
+      localStorage.removeItem(PBI_HISTORY_STORAGE_KEY);
+      renderPbiHistory();
+      return;
+    }
+    const item = target?.closest("[data-pbi-history-text]");
+    if (!item) return;
+    el.pbiInput.value = item.dataset.pbiHistoryText || "";
+  });
   el.jiraIssueSave.addEventListener("click", saveJiraIssueChanges);
   el.jiraIssueBody.addEventListener("click", event => {
     const button = event.target.closest("[data-jira-edit-field]");

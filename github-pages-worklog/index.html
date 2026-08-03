@@ -15,6 +15,7 @@
         <button id="btn-theme" class="btn" type="button" aria-label="Switch to light theme">☀ Light</button>
         <button id="btn-import" class="btn" disabled>Import JSON</button>
         <input id="import-file" type="file" accept="application/json,.json" hidden>
+        <button id="btn-pbi-creator" class="btn" type="button">PBI Creator</button>
         <button id="btn-jira-settings" class="btn" disabled>Jira Settings</button>
         <button id="btn-login" class="btn primary">Sign in with Google</button>
         <button id="btn-logout" class="btn" hidden>Sign out</button>
@@ -233,6 +234,9 @@
           <input id="f-jira-api-token" type="password" placeholder="Atlassian API token" autocomplete="new-password">
         </label>
       </div>
+      <label>PBI Draft API Endpoint
+        <input id="f-pbi-draft-url" type="url" placeholder="https://your-power-automate-endpoint">
+      </label>
       <label>Desktop Sync Firebase UID
         <input id="f-desktop-sync-uid" readonly>
       </label>
@@ -256,12 +260,52 @@
     </form>
   </dialog>
 
+  <dialog id="pbi-dialog" class="pbi-dialog">
+    <form method="dialog" id="pbi-dialog-form">
+      <div class="pbi-header">
+        <div>
+          <h2>AI PBI Creator</h2>
+          <p class="muted dialog-copy">Generate the draft through Power Automate, then create the Jira ticket safely through the Cloudflare worker with your saved Jira account.</p>
+        </div>
+        <div id="pbi-status" class="muted"></div>
+      </div>
+      <div class="pbi-layout">
+        <section class="card pbi-card">
+          <details class="pbi-history">
+            <summary>Recent inputs</summary>
+            <div id="pbi-history-list" class="pbi-history-list"></div>
+          </details>
+          <label>Description
+            <textarea id="pbi-initial-input" rows="5" placeholder="Describe the issue, bug, task, or story you want drafted."></textarea>
+          </label>
+          <div class="pbi-actions">
+            <button id="btn-pbi-analyze" type="button" class="btn primary">Analyze &amp; Generate Draft</button>
+            <span id="pbi-classification" class="badge" hidden></span>
+          </div>
+          <section id="pbi-editor-section" class="pbi-editor-section" hidden>
+            <div class="todo-section-label">Review &amp; edit draft</div>
+            <div id="pbi-dynamic-form" class="pbi-dynamic-form"></div>
+            <button id="btn-pbi-submit" type="button" class="btn primary">Confirm &amp; Create Ticket</button>
+          </section>
+        </section>
+        <section class="card pbi-card">
+          <div class="todo-section-label">Debug payloads</div>
+          <label>Request Payload</label>
+          <pre id="pbi-debug-request" class="json-display">// Waiting...</pre>
+          <label>Response</label>
+          <pre id="pbi-debug-response" class="json-display">// Waiting...</pre>
+        </section>
+      </div>
+      <menu>
+        <button type="submit" class="btn">Close</button>
+      </menu>
+    </form>
+  </dialog>
+
   <script src="./config.js"></script>
   <script type="module" src="./app.js"></script>
 </body>
 </html>
-
-
 
 
 

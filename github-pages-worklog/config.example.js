@@ -7,7 +7,7 @@ window.WORKLOG_CONFIG = {
     messagingSenderId: "REPLACE_ME",
     appId: "REPLACE_ME"
   },
-  jiraWorkerUrl: "https://your-worker.your-subdomain.workers.dev"
+  jiraWorkerUrl: "https://your-worker.your-subdomain.workers.dev",
+  pbiDraftUrl: ""
 };
-
 
