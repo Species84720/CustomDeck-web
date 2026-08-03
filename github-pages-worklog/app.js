@@ -626,6 +626,29 @@ function formatExportDate(ds) {
   return y && m && d ? `${d}/${m}/${y}` : String(ds || "");
 }
 
+function formatDisplayDate(ds) {
+  const [y, m, d] = String(ds || "").slice(0, 10).split("-");
+  const year = Number(y);
+  const month = Number(m);
+  const day = Number(d);
+  if (!year || !month || !day) return String(ds || "");
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${day} ${months[month - 1] || String(m).padStart(2, "0")} ${year}`;
+}
+
+function effortPointsLabel(minutes) {
+  if (!Number.isFinite(minutes) || minutes <= 0) return "";
+  const points = Math.round((minutes / 90) * 100) / 100;
+  return Number.isInteger(points) ? String(points) : String(points).replace(/\.?0+$/, "");
+}
+
+function issueWorkDescription(entry) {
+  const task = String(entry?.task || "").trim();
+  const note = String(entry?.note || "").replaceAll("\n", " ").trim();
+  if (task && note) return `${task} - ${note}`;
+  return task || note;
+}
+
 function escapeHtml(v) {
   return String(v || "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 }
@@ -2222,18 +2245,14 @@ async function fetchJiraSprints() {
 function copyIssueRows(issueKey) {
   const rows = selectedSprintEntries().filter(e => (e.jiraIssue || "UNLINKED").trim().toUpperCase() === issueKey);
   if (!rows.length) return;
-  const headers = ["Date", "Start", "End", "Duration", "Type", "Jira", "Task", "Note"];
+  const headers = ["Effort", "Description", "Date"];
   const out = [];
   rows.forEach(e => {
+    const minutes = e.end ? Math.max(0, mins(e.end) - mins(e.start)) : 0;
     out.push([
-      e.date,
-      e.start,
-      e.end || "",
-      e.end ? durLabel(Math.max(0, mins(e.end) - mins(e.start))) : "Open",
-      (e.isOvertime || e.tag === "overtime") ? "Overtime" : "Normal",
-      e.jiraIssue || "",
-      e.task || "",
-      (e.note || "").replaceAll("\n", " ")
+      effortPointsLabel(minutes),
+      issueWorkDescription(e),
+      formatDisplayDate(e.date)
     ]);
   });
   writeTableClipboard(headers, out).then(() => alert(`Copied ${rows.length} rows for ${issueKey}.`));
