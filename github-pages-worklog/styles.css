@@ -311,6 +311,9 @@ body { background-color:#080b14; background-image:radial-gradient(circle at 12% 
 .sprint-issue-item:hover { border-color:#32c8e6;transform:translateY(-1px); }
 .sprint-issue-copy { display:grid;gap:5px;min-width:0; }
 .jira-status { width:max-content;max-width:100%;padding:2px 7px;border:1px solid #31516a;border-radius:999px;background:#173246;color:#77d7f2;font-size:10px;font-weight:700;line-height:1.3; }
+.sprint-issue-card.is-fully-logged { opacity:.62; filter:saturate(.72); }
+.sprint-issue-card.is-fully-logged:hover { opacity:.72; }
+.sprint-internal-card { border-left-color:#6b7280 !important; }
 @media(max-width:1100px){.workspace{grid-template-columns:1fr}.focus-sidebar{position:static;grid-row:1}.todo-list{max-height:280px}}
 @media(max-width:520px){.app{padding:12px}.topbar{align-items:flex-start}.brand p{display:none}.topbar-actions{gap:5px}.section-heading{align-items:flex-end}}
 
@@ -341,6 +344,7 @@ html[data-theme="light"] .block .meta,
 html[data-theme="light"] .sprint-issue-summary { color:#55657d; }
 html[data-theme="light"] .block { background:#ffffff; border-color:#d3dce8; color:var(--text); }
 html[data-theme="light"] .block[style*='border-left-color:var(--warn)'] { background:#fffaf0; }
+html[data-theme="light"] .sprint-issue-card.is-fully-logged { opacity:.7; filter:saturate(.72); }
 
 .jira-issue-details { display:grid;gap:10px;max-height:65vh;overflow:auto;min-width:min(620px,80vw); }
 .jira-detail-row { display:grid;gap:3px;padding-bottom:8px;border-bottom:1px solid var(--border); }

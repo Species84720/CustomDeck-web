@@ -947,6 +947,12 @@ function issueTypeColor(entry) {
   return "#4f8cff";
 }
 
+function sprintIssueColor(issueKey) {
+  const key = String(issueKey || "").trim().toUpperCase();
+  if (!key || key === "UNLINKED") return "#6b7280";
+  return issueTypeColor({ jiraIssue: key });
+}
+
 function sortedForDay(day, ignoreId = "") {
   return sortedEntries(allEntries.filter(e => e.date === day && e.id !== ignoreId));
 }
@@ -1560,6 +1566,8 @@ function renderSprintView() {
         ? "<div class='sprint-issue-heading'><span class='badge warn'>Unlinked</span><span class='sprint-issue-summary'>No Jira issue linked</span></div>"
         : `<div class='sprint-issue-heading'><span class='badge'>${escapeHtml(issue)}</span><span class='sprint-issue-summary'>${escapeHtml(summaryLabel)}</span></div>`;
       const openAttr = openIssues.has(issue) ? " open" : "";
+      const cardClasses = `block sprint-issue-card${allLogged ? " is-fully-logged" : ""}`;
+      const borderColor = sprintIssueColor(issue);
       const rowList = rows
         .sort((a, b) => `${a.date}T${a.start}`.localeCompare(`${b.date}T${b.start}`))
         .map(r => {
@@ -1572,7 +1580,7 @@ function renderSprintView() {
             <button class='btn' data-action='edit' data-id='${r.id}'>Edit</button>
           </div>`;
         }).join("");
-      return `<article class='block'>
+      return `<article class='${cardClasses}' style='border-left-color:${borderColor}'>
         <details data-sprint-issue='${escapeHtml(issue)}'${openAttr}>
           <summary class='head'><div class='task'>${issueTitle}</div><div class='meta'>${rows.length} blocks</div></summary>
           <div class='meta' style='margin-top:8px'>Total: ${durLabel(total)}${totalPoints ? ` (${totalPoints} pt)` : ""} | OT: ${durLabel(ot)}</div>
@@ -1598,8 +1606,8 @@ function renderSprintView() {
           <button class='btn' data-action='edit' data-id='${r.id}'>Edit</button>
         </div>`;
       }).join("");
-    internalHtml = `<article class='block' style='border-left-color:var(--warn)'>
-      <details data-sprint-issue='__internal__'${openIssues.has("__internal__") || !openIssues.size ? " open" : ""}>
+    internalHtml = `<article class='block sprint-issue-card sprint-internal-card' style='border-left-color:#6b7280'>
+      <details data-sprint-issue='__internal__'${openIssues.has("__internal__") ? " open" : ""}>
         <summary class='head'><div class='task'><span class='badge warn'>No Jira / Internal</span></div><div class='meta'>${internalRows.length} blocks</div></summary>
         <div class='meta' style='margin-top:8px'>Total: ${durLabel(total)} | OT: ${durLabel(ot)}</div>
         <div class='actions'><button class='btn' data-action='copy-internal'>Copy Internal Rows</button></div>
@@ -1608,7 +1616,7 @@ function renderSprintView() {
     </article>`;
   }
 
-  el.sprintView.innerHTML = `${sprintHeader}${internalHtml}${issueHtml}`;
+  el.sprintView.innerHTML = `${sprintHeader}${issueHtml}${internalHtml}`;
 }
 
 async function toggleIssueLogged(issueKey, checked) {
