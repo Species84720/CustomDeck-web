@@ -2470,7 +2470,10 @@ async function saveEntry(evt) {
   if (error) return alert(error);
   const id = rawId || `${entry.date.replaceAll("-", "")}${entry.start.replaceAll(":", "")}_${crypto.randomUUID().slice(0, 8)}`;
   await setDoc(doc(db, `users/${currentUser.uid}/entries/${id}`), entry, { merge: true });
-  if (entry.jiraIssue && !entry.noJira) ensureJiraIssueCached(entry.jiraIssue);
+  if (entry.jiraIssue && !entry.noJira) {
+    if (!rawId) await moveNewBlockJiraIssueToInProgress(entry.jiraIssue);
+    ensureJiraIssueCached(entry.jiraIssue);
+  }
   el.dialog.close();
   await loadEntries();
 }
@@ -2744,6 +2747,25 @@ async function moveJiraIssue(issueKey) {
   }
 }
 
+async function moveNewBlockJiraIssueToInProgress(issueKey) {
+  const key = String(issueKey || "").trim().toUpperCase();
+  const sprint = currentSprint();
+  const issue = jiraIssueCache.find(item => String(item?.key || "").trim().toUpperCase() === key);
+  if (!sprint || !issue || jiraIssueStatus(issue).trim().toLowerCase() !== "to do") return false;
+
+  try {
+    const data = await jiraWorkerFetch("/jira/transitions?key=" + encodeURIComponent(key), { key });
+    const transition = (data.transitions || []).find(item => String(item?.to || "").trim().toLowerCase() === "in progress");
+    if (!transition?.id) return false;
+    await jiraWorkerFetch("/jira/transition?key=" + encodeURIComponent(key), { key, transitionId: transition.id });
+    const cached = jiraIssueCache.find(item => String(item?.key || "").trim().toUpperCase() === key);
+    if (cached) cached.status = "In Progress";
+    return true;
+  } catch (err) {
+    console.warn("Could not move new block Jira issue to In Progress", key, err);
+    return false;
+  }
+}
 async function commentOnJiraIssue(issueKey) {
   const comment = window.prompt("Comment on " + issueKey + " (you can include @ mentions):");
   if (comment === null || !comment.trim()) return;
