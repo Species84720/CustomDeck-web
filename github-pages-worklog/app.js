@@ -1014,10 +1014,10 @@ function normalizePbiIssueType(value) {
 
 function pbiFieldKeysForIssueType(issueType) {
   const normalized = normalizePbiIssueType(issueType).toLowerCase();
-  if (normalized === "bug") return ["summary", "description", "module_or_screen", "steps_to_reproduce", "expected_behavior"];
-  if (normalized === "story") return ["summary", "description", "actor", "use_case_goal", "acceptance_criteria"];
-  if (normalized === "task") return ["summary", "description", "outcome"];
-  return ["summary", "description"];
+  if (normalized === "bug") return ["summary", "description", "priority", "module_or_screen", "steps_to_reproduce", "expected_behavior"];
+  if (normalized === "story") return ["summary", "description", "priority", "actor", "use_case_goal", "acceptance_criteria"];
+  if (normalized === "task") return ["summary", "description", "priority", "outcome"];
+  return ["summary", "description", "priority"];
 }
 
 function buildPbiIssueTypeSelect(selectedIssueType) {
@@ -1050,25 +1050,37 @@ function createPbiField(key, value) {
   const wrap = document.createElement("label");
   wrap.className = "pbi-field";
   wrap.textContent = pbiFieldLabel(key);
-  const useTextarea = Array.isArray(value) || typeof value === "object" || String(value || "").includes("\n") || String(value || "").length > 160 || key === "description" || key === "steps_to_reproduce" || key === "expected_behavior" || key === "acceptance_criteria" || key === "outcome";
+  const fieldValue = key === "priority" ? (jiraDetailText(value) || "Medium") : value;
+  if (key === "priority") {
+    const select = document.createElement("select");
+    select.name = key;
+    select.className = "form-control";
+    ["Highest", "High", "Medium", "Low", "Lowest"].forEach(optionValue => {
+      const option = document.createElement("option");
+      option.value = optionValue;
+      option.textContent = optionValue;
+      option.selected = optionValue.toLowerCase() === String(fieldValue).toLowerCase();
+      select.appendChild(option);
+    });
+    wrap.appendChild(select);
+    return wrap;
+  }
+  const useTextarea = Array.isArray(fieldValue) || typeof fieldValue === "object" || String(fieldValue || "").includes("\n") || String(fieldValue || "").length > 160 || key === "description" || key === "steps_to_reproduce" || key === "expected_behavior" || key === "acceptance_criteria" || key === "outcome";
   const input = document.createElement(useTextarea ? "textarea" : "input");
   input.name = key;
   input.className = "form-control";
   if (useTextarea) {
-    input.rows = Array.isArray(value) ? Math.min(Math.max(value.length + 1, 4), 8) : 4;
-    input.value = Array.isArray(value)
-      ? value.join("\n")
-      : (typeof value === "object" && value !== null ? JSON.stringify(value, null, 2) : String(value || ""));
-    if (Array.isArray(value)) input.dataset.pbiArrayLines = "1";
-    if (typeof value === "object" && value !== null && !Array.isArray(value)) input.dataset.pbiJsonObject = "1";
+    input.rows = Array.isArray(fieldValue) ? Math.min(Math.max(fieldValue.length + 1, 4), 8) : 4;
+    input.value = Array.isArray(fieldValue) ? fieldValue.join("\n") : (typeof fieldValue === "object" && fieldValue !== null ? JSON.stringify(fieldValue, null, 2) : String(fieldValue || ""));
+    if (Array.isArray(fieldValue)) input.dataset.pbiArrayLines = "1";
+    if (typeof fieldValue === "object" && fieldValue !== null && !Array.isArray(fieldValue)) input.dataset.pbiJsonObject = "1";
   } else {
     input.type = "text";
-    input.value = String(value || "");
+    input.value = String(fieldValue || "");
   }
   wrap.appendChild(input);
   return wrap;
 }
-
 function snapshotPbiVisibleFields() {
   if (!currentPbiDraftFields) return;
   const values = collectPbiDraftValues();
@@ -2598,43 +2610,44 @@ function jiraAdfFromText(text) {
   })) };
 }
 
-function jiraFieldInput(fieldId, meta, currentValue) {
-  const value = jiraEditableText(currentValue);
-  const allowed = Array.isArray(meta.allowedValues) ? meta.allowedValues : [];
-  const label = String(meta.name || fieldId);
-  if (allowed.length) {
-    return '<select data-jira-field="' + escapeHtml(fieldId) + '"><option value=""></option>' +
-      allowed.map(item => {
-        const optionValue = String(item.id || item.value || item.name || "");
-        return '<option value="' + escapeHtml(optionValue) + '"' + (optionValue === value ? " selected" : "") + '>' + escapeHtml(String(item.name || item.value || optionValue)) + "</option>";
-      }).join("") + "</select>";
-  }
-  const multiline = fieldId === "description" || label.toLowerCase().includes("description");
-  return multiline ? '<textarea data-jira-field="' + escapeHtml(fieldId) + '" rows="4">' + escapeHtml(value) + "</textarea>"
-    : '<input data-jira-field="' + escapeHtml(fieldId) + '" value="' + escapeHtml(value) + '">';
+function pbiJiraFieldSpecs(issue) {
+  const type = normalizePbiIssueType(issue?.fields?.issuetype?.name || issue?.fields?.issuetype || issue?.issuetype).toLowerCase();
+  const specs = [
+    { key: "summary", jiraId: "summary", label: "Summary" },
+    { key: "description", jiraId: "description", label: "Description" },
+    { key: "priority", jiraId: "priority", label: "Priority" }
+  ];
+  if (type === "bug") specs.push({ key: "module_or_screen", jiraId: "customfield_10086", label: "Module or screen" }, { key: "expected_behavior", jiraId: "customfield_10085", label: "Expected behavior" });
+  if (type === "story") specs.push({ key: "actor", jiraId: "customfield_10081", label: "Actor" }, { key: "use_case_goal", jiraId: "customfield_10080", label: "Use case goal" }, { key: "acceptance_criteria", jiraId: "customfield_10083", label: "Acceptance criteria" });
+  if (type === "task") specs.push({ key: "outcome", jiraId: "customfield_10121", label: "Outcome" });
+  return specs;
+}
+
+function jiraFieldInput(fieldId, meta, currentValue, logicalKey = fieldId) {
+  const value = jiraDetailText(currentValue);
+  if (logicalKey === "priority") return '<select data-jira-field="' + escapeHtml(fieldId) + '" data-jira-pbi-key="priority">' + ["Highest", "High", "Medium", "Low", "Lowest"].map(option => '<option value="' + option + '"' + (option.toLowerCase() === value.toLowerCase() ? " selected" : "") + '>' + option + '</option>').join("") + "</select>";
+  const allowed = Array.isArray(meta?.allowedValues) ? meta.allowedValues : [];
+  if (allowed.length) return '<select data-jira-field="' + escapeHtml(fieldId) + '" data-jira-pbi-key="' + escapeHtml(logicalKey) + '"><option value=""></option>' + allowed.map(item => { const optionValue = String(item.id || item.value || item.name || ""); const optionLabel = String(item.name || item.value || optionValue); return '<option value="' + escapeHtml(optionValue) + '"' + (optionValue === value || optionLabel === value ? " selected" : "") + '>' + escapeHtml(optionLabel) + "</option>"; }).join("") + "</select>";
+  const multiline = ["description", "expected_behavior", "use_case_goal", "acceptance_criteria", "outcome"].includes(logicalKey);
+  return multiline ? '<textarea data-jira-field="' + escapeHtml(fieldId) + '" data-jira-pbi-key="' + escapeHtml(logicalKey) + '" rows="4">' + escapeHtml(value) + "</textarea>" : '<input data-jira-field="' + escapeHtml(fieldId) + '" data-jira-pbi-key="' + escapeHtml(logicalKey) + '" value="' + escapeHtml(value) + '">';
 }
 
 function showJiraIssueDetails(issue, editMeta = {}) {
   jiraIssueDraft = issue;
   jiraIssueEditMeta = editMeta || {};
   const fields = issue.fields || {};
-  const standard = [["summary", "Summary"], ["description", "Description"], ["status", "Status"], ["issuetype", "Issue type"], ["priority", "Priority"], ["assignee", "Assignee"], ["reporter", "Reporter"], ["labels", "Labels"], ["components", "Components"]];
-  const ids = [...new Set([...standard.map(([id]) => id), ...Object.keys(jiraIssueEditMeta)])];
+  const specs = pbiJiraFieldSpecs(issue);
   el.jiraIssueTitle.textContent = String(issue.key || "Jira Issue") + " · " + String(fields.summary || "");
-  el.jiraIssueBody.innerHTML = ids.map(fieldId => {
-    const meta = jiraIssueEditMeta[fieldId];
-    const raw = fields[fieldId];
-    const value = jiraDetailText(raw);
-    if (!value && !meta) return "";
-    const label = meta?.name || standard.find(item => item[0] === fieldId)?.[1] || fieldId;
+  el.jiraIssueBody.innerHTML = specs.map(spec => {
+    const meta = jiraIssueEditMeta[spec.jiraId];
+    const value = jiraDetailText(fields[spec.jiraId]);
     const editable = !!meta && Array.isArray(meta.operations) && meta.operations.includes("set");
-    const content = editable ? '<div class="jira-field-display">' + escapeHtml(value) + '</div><button type="button" class="btn jira-edit-field" data-jira-edit-field="' + escapeHtml(fieldId) + '">Edit</button>' : '<div class="jira-detail-value">' + escapeHtml(value) + "</div>";
-    return '<div class="jira-detail-row"><div class="jira-detail-label">' + escapeHtml(label) + (editable ? ' <span class="jira-editable-label">editable</span>' : "") + "</div>" + content + "</div>";
+    const content = editable ? '<div class="jira-field-display">' + escapeHtml(value || "Not set") + '</div><button type="button" class="btn jira-edit-field" data-jira-edit-field="' + escapeHtml(spec.jiraId) + '" data-jira-pbi-key="' + escapeHtml(spec.key) + '">Edit</button>' : '<div class="jira-detail-value">' + escapeHtml(value || "Not set") + "</div>";
+    return '<div class="jira-detail-row"><div class="jira-detail-label">' + escapeHtml(spec.label) + (editable ? ' <span class="jira-editable-label">editable</span>' : "") + "</div>" + content + "</div>";
   }).join("");
   el.jiraIssueSave.hidden = true;
   el.jiraIssueDialog.showModal();
 }
-
 async function viewJiraIssue(issueKey) {
   try {
     const results = await Promise.all([
@@ -2652,12 +2665,12 @@ async function saveJiraIssueChanges() {
   const fields = {};
   el.jiraIssueBody.querySelectorAll("[data-jira-field]").forEach(control => {
     const fieldId = control.dataset.jiraField;
+    const logicalKey = control.dataset.jiraPbiKey || fieldId;
     const meta = jiraIssueEditMeta[fieldId] || {};
     const value = control.value.trim();
-    if (fieldId === "labels") fields[fieldId] = value ? value.split(",").map(item => item.trim()).filter(Boolean) : [];
-    else if (fieldId === "priority") fields[fieldId] = value ? { name: value } : null;
+    if (logicalKey === "priority") fields[fieldId] = value ? { name: value } : null;
+    else if (["description", "expected_behavior", "use_case_goal", "acceptance_criteria", "outcome"].includes(logicalKey)) fields[fieldId] = jiraAdfFromText(value);
     else if (String(meta.schema?.type || "").toLowerCase() === "array") fields[fieldId] = value ? value.split(",").map(item => item.trim()).filter(Boolean) : [];
-    else if (fieldId === "description") fields[fieldId] = jiraAdfFromText(value);
     else fields[fieldId] = value || null;
   });
   if (!Object.keys(fields).length) return;
@@ -3046,7 +3059,7 @@ function wireEvents() {
     const meta = jiraIssueEditMeta[fieldId] || {};
     const raw = jiraIssueDraft?.fields?.[fieldId];
     button.remove();
-    row.querySelector(".jira-field-display")?.replaceWith(document.createRange().createContextualFragment(jiraFieldInput(fieldId, meta, raw)));
+    row.querySelector(".jira-field-display")?.replaceWith(document.createRange().createContextualFragment(jiraFieldInput(fieldId, meta, raw, button.dataset.jiraPbiKey || fieldId)));
     el.jiraIssueSave.hidden = false;
   });
   el.jiraSettingsCancel.addEventListener("click", () => el.jiraSettingsDialog.close());
