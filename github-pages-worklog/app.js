@@ -2773,6 +2773,7 @@ async function moveNewBlockJiraIssueToInProgress(issueKey) {
     await jiraWorkerFetch("/jira/transition?key=" + encodeURIComponent(key), { key, transitionId: transition.id });
     const cached = jiraIssueCache.find(item => String(item?.key || "").trim().toUpperCase() === key);
     if (cached) cached.status = "In Progress";
+    updateJiraDropdown();
     return true;
   } catch (err) {
     console.warn("Could not move new block Jira issue to In Progress", key, err);
