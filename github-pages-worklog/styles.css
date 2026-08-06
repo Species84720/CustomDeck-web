@@ -328,6 +328,9 @@ body { background-color:#080b14; background-image:radial-gradient(circle at 12% 
 .sprint-issue-item:hover { border-color:#32c8e6;transform:translateY(-1px); }
 .sprint-issue-copy { display:grid;gap:5px;min-width:0; }
 .jira-status { width:max-content;max-width:100%;padding:2px 7px;border:1px solid #31516a;border-radius:999px;background:#173246;color:#77d7f2;font-size:10px;font-weight:700;line-height:1.3; }
+.jira-issue-meta { display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0; }
+.jira-story-points { width:max-content;padding:2px 7px;border:1px solid #42516f;border-radius:999px;background:#1b2540;color:#c7d2fe;font-size:10px;font-weight:700;line-height:1.3; }
+html[data-theme="light"] .jira-story-points { border-color:#c7d2fe;background:#eef2ff;color:#4338ca; }
 .sprint-issue-card.is-fully-logged { opacity:.62; filter:saturate(.72); }
 .sprint-issue-card.is-fully-logged:hover { opacity:.72; }
 .sprint-internal-card { border-left-color:#6b7280 !important; }

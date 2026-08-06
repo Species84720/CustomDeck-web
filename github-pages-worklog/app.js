@@ -107,6 +107,7 @@ const el = {
   jiraPbiDraftUrl: document.getElementById("f-pbi-draft-url"),
   jiraUatApiUrl: document.getElementById("f-uat-api-url"),
   jiraQaMentionAccountId: document.getElementById("f-qa-mention-account-id"),
+  jiraStoryPointsFieldId: document.getElementById("f-story-points-field-id"),
   desktopSyncUid: document.getElementById("f-desktop-sync-uid"),
   jiraPassphrase: document.getElementById("f-jira-passphrase"),
   jiraPassphraseConfirm: document.getElementById("f-jira-passphrase-confirm"),
@@ -336,7 +337,8 @@ function normalizeJiraSettings(raw) {
     encryptedApiToken,
     pbiDraftUrl: String(raw?.pbiDraftUrl || cfg.pbiDraftUrl || "").trim(),
     uatApiUrl: String(raw?.uatApiUrl || cfg.uatApiUrl || "").trim(),
-    qaMentionAccountId: String(raw?.qaMentionAccountId || "").trim()
+    qaMentionAccountId: String(raw?.qaMentionAccountId || "").trim(),
+    storyPointsFieldId: String(raw?.storyPointsFieldId || "").trim()
   };
 }
 
@@ -478,6 +480,7 @@ function fillJiraSettingsForm() {
   el.jiraPbiDraftUrl.value = settings.pbiDraftUrl || "";
   el.jiraUatApiUrl.value = settings.uatApiUrl || "";
   el.jiraQaMentionAccountId.value = settings.qaMentionAccountId || "";
+  el.jiraStoryPointsFieldId.value = settings.storyPointsFieldId || "";
   el.desktopSyncUid.value = currentUser?.uid || "";
   el.jiraPassphrase.value = "";
   el.jiraPassphraseConfirm.value = "";
@@ -563,6 +566,7 @@ async function saveJiraSettings(evt) {
       pbiDraftUrl: el.jiraPbiDraftUrl.value,
       uatApiUrl: el.jiraUatApiUrl.value,
       qaMentionAccountId: el.jiraQaMentionAccountId.value,
+      storyPointsFieldId: el.jiraStoryPointsFieldId.value,
       apiToken: userJiraSettings.apiToken,
       encryptedApiToken: userJiraSettings.encryptedApiToken
     });
@@ -1684,6 +1688,14 @@ function sortedCurrentSprintIssues() {
   });
 }
 
+function jiraIssueStoryPoints(issue) {
+  const fieldId = String(userJiraSettings.storyPointsFieldId || "").trim();
+  if (!fieldId) return "";
+  const fields = issue?.fields || {};
+  const value = issue?.storyPoints ?? fields[fieldId];
+  if (value && typeof value === "object") return String(value.value ?? value.name ?? "").trim();
+  return value === null || value === undefined ? "" : String(value).trim();
+}
 function normalizeJiraIssue(issue) {
   const fields = issue?.fields || {};
   return {
@@ -1691,7 +1703,8 @@ function normalizeJiraIssue(issue) {
     key: String(issue?.key || "").trim().toUpperCase(),
     summary: String(issue?.summary || fields.summary || "").trim(),
     issuetype: String(issue?.issuetype?.name || issue?.issuetype || fields.issuetype?.name || fields.issuetype || "").trim(),
-    status: jiraIssueStatus(issue)
+    status: jiraIssueStatus(issue),
+    storyPoints: jiraIssueStoryPoints(issue)
   };
 }
 
@@ -1752,7 +1765,7 @@ function renderCurrentSprintIssues(message = "") {
   el.sprintIssuesList.innerHTML = sortedCurrentSprintIssues().map(issue => `
     <button type="button" class="sprint-issue-item" data-jira-issue="${escapeHtml(issue.key)}" style="--issue-accent:${issueTypeColor({ jiraIssue: issue.key })}">
       <span class="badge">${escapeHtml(issue.key)}</span>
-      <span class="sprint-issue-copy"><span>${escapeHtml(issue.summary || "Summary unavailable")}</span><span class="jira-status">${escapeHtml(jiraIssueStatus(issue))}</span></span>
+      <span class="sprint-issue-copy"><span>${escapeHtml(issue.summary || "Summary unavailable")}</span><span class="jira-issue-meta"><span class="jira-status">${escapeHtml(jiraIssueStatus(issue))}</span>${jiraIssueStoryPoints(issue) ? `<span class="jira-story-points">SP ${escapeHtml(jiraIssueStoryPoints(issue))}</span>` : ""}</span></span>
     </button>`).join("");
 }
 
@@ -2634,13 +2647,15 @@ function jiraAdfTableFromRows(headers, rows) {
     }]
   };
 }
-function pbiJiraFieldSpecs(issue) {
+function pbiJiraFieldSpecs(issue, editMeta = {}) {
   const type = normalizePbiIssueType(issue?.fields?.issuetype?.name || issue?.fields?.issuetype || issue?.issuetype).toLowerCase();
   const specs = [
     { key: "summary", jiraId: "summary", label: "Summary" },
     { key: "description", jiraId: "description", label: "Description" },
     { key: "priority", jiraId: "priority", label: "Priority" }
   ];
+  const storyPointsFieldId = String(userJiraSettings.storyPointsFieldId || "").trim();
+  if (storyPointsFieldId) specs.push({ key: "story_points", jiraId: storyPointsFieldId, label: "Story point estimate" });
   if (type === "bug") specs.push({ key: "module_or_screen", jiraId: "customfield_10086", label: "Module or screen" }, { key: "expected_behavior", jiraId: "customfield_10085", label: "Expected behavior" });
   if (type === "story") specs.push({ key: "actor", jiraId: "customfield_10081", label: "Actor" }, { key: "use_case_goal", jiraId: "customfield_10080", label: "Use case goal" }, { key: "acceptance_criteria", jiraId: "customfield_10083", label: "Acceptance criteria" });
   if (type === "task") specs.push({ key: "outcome", jiraId: "customfield_10121", label: "Outcome" });
@@ -2649,6 +2664,7 @@ function pbiJiraFieldSpecs(issue) {
 
 function jiraFieldInput(fieldId, meta, currentValue, logicalKey = fieldId) {
   const value = jiraDetailText(currentValue);
+  if (logicalKey === "story_points") return '<input type="number" min="0" step="0.5" data-jira-field="' + escapeHtml(fieldId) + '" data-jira-pbi-key="story_points" value="' + escapeHtml(value) + '">';
   if (logicalKey === "priority") return '<select data-jira-field="' + escapeHtml(fieldId) + '" data-jira-pbi-key="priority">' + ["Highest", "High", "Medium", "Low", "Lowest"].map(option => '<option value="' + option + '"' + (option.toLowerCase() === value.toLowerCase() ? " selected" : "") + '>' + option + '</option>').join("") + "</select>";
   const allowed = Array.isArray(meta?.allowedValues) ? meta.allowedValues : [];
   if (allowed.length) return '<select data-jira-field="' + escapeHtml(fieldId) + '" data-jira-pbi-key="' + escapeHtml(logicalKey) + '"><option value=""></option>' + allowed.map(item => { const optionValue = String(item.id || item.value || item.name || ""); const optionLabel = String(item.name || item.value || optionValue); return '<option value="' + escapeHtml(optionValue) + '"' + (optionValue === value || optionLabel === value ? " selected" : "") + '>' + escapeHtml(optionLabel) + "</option>"; }).join("") + "</select>";
@@ -2660,7 +2676,7 @@ function showJiraIssueDetails(issue, editMeta = {}) {
   jiraIssueDraft = issue;
   jiraIssueEditMeta = editMeta || {};
   const fields = issue.fields || {};
-  const specs = pbiJiraFieldSpecs(issue);
+  const specs = pbiJiraFieldSpecs(issue, jiraIssueEditMeta);
   el.jiraIssueTitle.textContent = String(issue.key || "Jira Issue") + " · " + String(fields.summary || "");
   el.jiraIssueBody.innerHTML = specs.map(spec => {
     const meta = jiraIssueEditMeta[spec.jiraId];
@@ -2692,7 +2708,8 @@ async function saveJiraIssueChanges() {
     const logicalKey = control.dataset.jiraPbiKey || fieldId;
     const meta = jiraIssueEditMeta[fieldId] || {};
     const value = control.value.trim();
-    if (logicalKey === "priority") fields[fieldId] = value ? { name: value } : null;
+    if (logicalKey === "story_points") fields[fieldId] = value === "" ? null : Number(value);
+    else if (logicalKey === "priority") fields[fieldId] = value ? { name: value } : null;
     else if (["description", "expected_behavior", "use_case_goal", "acceptance_criteria", "outcome"].includes(logicalKey)) fields[fieldId] = jiraAdfFromText(value);
     else if (String(meta.schema?.type || "").toLowerCase() === "array") fields[fieldId] = value ? value.split(",").map(item => item.trim()).filter(Boolean) : [];
     else fields[fieldId] = value || null;
