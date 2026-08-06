@@ -1706,20 +1706,41 @@ function jiraIssueMatchesDropdownSearch(issue, query) {
   return !query || text.includes(query.toLowerCase());
 }
 
-function updateJiraDropdown(searchQuery = "") {
-  const list = document.getElementById("jira-issue-options");
-  if (!list) return;
-  const query = String(searchQuery || "").trim();
-  list.innerHTML = "";
-  sortedCurrentSprintIssues()
-    .filter(issue => jiraIssueMatchesDropdownSearch(issue, query))
-    .forEach(issue => {
-      const option = document.createElement("option");
-      const status = jiraIssueStatus(issue);
-      option.value = issue.key;
-      option.label = issue.key + " - " + (issue.summary || "").slice(0, 80) + (status ? " [" + status + "]" : "");
-      list.appendChild(option);
+function initJiraIssueSelect() {
+  const $ = window.jQuery;
+  if (!$ || !$.fn?.select2 || !el.jiraSelect) return;
+  const select = $(el.jiraSelect);
+  if (!select.hasClass("select2-hidden-accessible")) {
+    select.select2({
+      width: "100%",
+      placeholder: "Pick from current sprint",
+      allowClear: true,
+      dropdownAutoWidth: true,
+      matcher: (params, data) => {
+        const term = String(params.term || "").trim().toLowerCase();
+        if (!term) return data;
+        const issue = jiraIssueCache.find(item => item.key === data.id);
+        const haystack = [data.text, issue?.key, issue?.summary, jiraIssueStatus(issue)].join(" ").toLowerCase();
+        return haystack.includes(term) ? data : null;
+      }
     });
+  }
+}
+
+function updateJiraDropdown() {
+  if (!el.jiraSelect) return;
+  const cur = el.jiraSelect.value;
+  el.jiraSelect.innerHTML = '<option value="">Pick from current sprint</option>';
+  sortedCurrentSprintIssues().forEach(issue => {
+    const option = document.createElement("option");
+    option.value = issue.key;
+    const status = jiraIssueStatus(issue);
+    option.textContent = issue.key + " - " + (issue.summary || "").slice(0, 80) + (status ? " [" + status + "]" : "");
+    el.jiraSelect.appendChild(option);
+  });
+  el.jiraSelect.value = cur;
+  initJiraIssueSelect();
+  if (window.jQuery && window.jQuery.fn?.select2) window.jQuery(el.jiraSelect).trigger("change.select2");
   renderCurrentSprintIssues();
 }
 function jiraIssueStatus(issue) {
@@ -3216,9 +3237,6 @@ function wireEvents() {
   el.jiraSettingsCancel.addEventListener("click", () => el.jiraSettingsDialog.close());
   el.jiraSettingsClear.addEventListener("click", clearJiraSettings);
   el.cancelBtn.addEventListener("click", () => el.dialog.close());
-  el.jiraSelect.addEventListener("input", () => {
-    updateJiraDropdown(el.jiraSelect.value);
-  });
   el.jiraSelect.addEventListener("change", () => {
     if (el.jiraSelect.value) el.jira.value = el.jiraSelect.value;
   });

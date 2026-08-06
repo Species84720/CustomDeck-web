@@ -7,6 +7,7 @@
   <title>Work Log Cloud</title>
   <script>document.documentElement.dataset.theme = localStorage.getItem("worklog-theme") || "dark";</script>
   <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css">
 </head>
 <body>
   <div class="app">
@@ -154,8 +155,7 @@
       <div class="grid2">
         <label class="jira-field">Jira Issue
           <input id="f-jira" placeholder="CPM-123">
-          <input id="f-jira-select" list="jira-issue-options" placeholder="Search current sprint issues">
-          <datalist id="jira-issue-options"></datalist>
+          <select id="f-jira-select"><option value="">Pick from current sprint</option></select>
         </label>
         <label>Close Reason
           <input id="f-reason" placeholder="Done">
@@ -409,6 +409,8 @@
   </dialog>
 
   <script src="./config.js"></script>
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
   <script type="module" src="./app.js"></script>
 </body>
 </html>
