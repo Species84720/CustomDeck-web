@@ -171,6 +171,8 @@ let db;
 let currentUser = null;
 let allEntries = [];
 let jiraIssueCache = [];
+let jiraDropdownSearchBuffer = "";
+let jiraDropdownSearchTimer = null;
 let jiraIssueTypeByKey = {};
 let jiraIssueSummaryByKey = {};
 const jiraIssueLookupPending = new Set();
@@ -1670,21 +1672,27 @@ function updateStats(entries) {
   el.sOverlap.textContent = String(countOverlaps(entries));
 }
 
-function updateJiraDropdown() {
+function jiraIssueMatchesDropdownSearch(issue, query) {
+  const text = [issue.key, issue.summary, jiraIssueStatus(issue)].join(" ").toLowerCase();
+  return !query || text.includes(query.toLowerCase());
+}
+
+function updateJiraDropdown(searchQuery = jiraDropdownSearchBuffer) {
   if (!el.jiraSelect) return;
   const cur = el.jiraSelect.value;
   el.jiraSelect.innerHTML = '<option value="">Pick from current sprint</option>';
-  jiraIssueCache.forEach(issue => {
-    const option = document.createElement("option");
-    option.value = issue.key;
-    const status = jiraIssueStatus(issue);
-    option.textContent = `${issue.key} - ${(issue.summary || "").slice(0, 80)}${status ? ` [${status}]` : ""}`;
-    el.jiraSelect.appendChild(option);
-  });
+  sortedCurrentSprintIssues()
+    .filter(issue => jiraIssueMatchesDropdownSearch(issue, searchQuery))
+    .forEach(issue => {
+      const option = document.createElement("option");
+      option.value = issue.key;
+      const status = jiraIssueStatus(issue);
+      option.textContent = issue.key + " - " + (issue.summary || "").slice(0, 80) + (status ? " [" + status + "]" : "");
+      el.jiraSelect.appendChild(option);
+    });
   el.jiraSelect.value = cur;
   renderCurrentSprintIssues();
 }
-
 function jiraIssueStatus(issue) {
   const status = issue?.status ?? issue?.statusName ?? issue?.status_name ?? issue?.issueStatus ?? issue?.state ?? issue?.fields?.status;
   return String(status?.name || status?.value || status || "Status unavailable").trim();
@@ -3179,6 +3187,22 @@ function wireEvents() {
   el.jiraSettingsCancel.addEventListener("click", () => el.jiraSettingsDialog.close());
   el.jiraSettingsClear.addEventListener("click", clearJiraSettings);
   el.cancelBtn.addEventListener("click", () => el.dialog.close());
+  el.jiraSelect.addEventListener("keydown", event => {
+    if (event.key === "Escape") {
+      jiraDropdownSearchBuffer = "";
+      updateJiraDropdown("");
+      return;
+    }
+    if (event.key.length !== 1 || event.ctrlKey || event.metaKey || event.altKey) return;
+    jiraDropdownSearchBuffer += event.key;
+    clearTimeout(jiraDropdownSearchTimer);
+    jiraDropdownSearchTimer = setTimeout(() => {
+      jiraDropdownSearchBuffer = "";
+      updateJiraDropdown("");
+    }, 1000);
+    updateJiraDropdown(jiraDropdownSearchBuffer);
+    event.preventDefault();
+  });
   el.jiraSelect.addEventListener("change", () => {
     if (el.jiraSelect.value) el.jira.value = el.jiraSelect.value;
   });
