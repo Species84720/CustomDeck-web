@@ -179,6 +179,7 @@ const jiraIssueLookupPending = new Set();
 let jiraIssueEditMeta = {};
 let jiraIssueDraft = null;
 let todoBeingEdited = null;
+let todoSearchQuery = "";
 let sprintCache = [];
 let userJiraSettings = emptyJiraSettings();
 let jiraUnlockSource = "";
@@ -1361,13 +1362,16 @@ function renderTodos() {
   const empty = document.getElementById("todo-empty");
   const count = document.getElementById("todo-count");
   const clear = document.getElementById("todo-clear");
+  const search = document.getElementById("todo-search");
   const progress = document.getElementById("todo-progress-bar");
   const finishedSection = document.getElementById("todo-finished-section");
   const finishedTitle = document.getElementById("todo-finished-title");
   const finishedList = document.getElementById("todo-finished-list");
   if (!list) return;
-  const visibleOpen = todos.filter(todo => !todo.done);
-  const visibleFinished = todos.filter(todo => todoMatchesSelectedFinishedDate(todo));
+  const query = String(todoSearchQuery || "").trim().toLowerCase();
+  const matchesSearch = todo => !query || [todo.text, todo.jiraIssue].some(value => String(value || "").toLowerCase().includes(query));
+  const visibleOpen = todos.filter(todo => !todo.done && matchesSearch(todo));
+  const visibleFinished = todos.filter(todo => todoMatchesSelectedFinishedDate(todo) && matchesSearch(todo));
   const remaining = visibleOpen.length;
   const completed = todos.filter(todo => todo.done).length;
   const viewingToday = selectedTodoDate() === localDateKey();
@@ -1408,6 +1412,7 @@ function wireTodoEvents() {
   const list = document.getElementById("todo-list");
   const finishedList = document.getElementById("todo-finished-list");
   const clear = document.getElementById("todo-clear");
+  const search = document.getElementById("todo-search");
   const handleTodoToggle = event => {
     const control = event.target;
     if (!(control instanceof HTMLInputElement) || control.dataset.todoAction !== "toggle") return;
@@ -1453,6 +1458,7 @@ function wireTodoEvents() {
     if (control.dataset.todoAction === "delete") todos = todos.filter(item => item.id !== id);
     saveTodos(); renderTodos();
   });
+  search?.addEventListener("input", event => { todoSearchQuery = String(event.target.value || ""); renderTodos(); });
   clear.addEventListener("click", () => { renderTodos(); });
   el.todoEditCancel.addEventListener("click", () => {
     todoBeingEdited = null;
