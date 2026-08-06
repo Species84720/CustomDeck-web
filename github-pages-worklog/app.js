@@ -2819,14 +2819,16 @@ function showJiraContextMenu(issueKey, x, y) {
   hideJiraContextMenu();
   const menu = document.createElement("div");
   menu.className = "jira-context-menu";
-  menu.innerHTML = "<button data-jira-menu='view'>View issue</button><button data-jira-menu='uat'>UAT test case</button><button data-jira-menu='move'>Change status</button><button data-jira-menu='comment'>Add comment</button><button data-jira-menu='todo'>Add to to-do list</button>";
+  menu.innerHTML = "<button data-jira-menu='view'>View issue</button><button data-jira-menu='uat'>UAT test case</button><button data-jira-menu='rows-description'>Add rows to Description</button><button data-jira-menu='rows-comment'>Add rows to comments</button><button data-jira-menu='comment'>Add comment</button><button data-jira-menu='move'>Change status</button><button data-jira-menu='todo'>Add to to-do list</button>";
   menu.style.left = Math.min(x, window.innerWidth - 190) + "px";
-  menu.style.top = Math.min(y, window.innerHeight - 180) + "px";
+  menu.style.top = Math.min(y, window.innerHeight - 290) + "px";
   menu.addEventListener("click", async event => {
     const action = event.target.closest("[data-jira-menu]")?.dataset.jiraMenu;
     hideJiraContextMenu();
     if (action === "view") await viewJiraIssue(issueKey);
     if (action === "uat") openUatDialog(issueKey);
+    if (action === "rows-description") await addIssueRowsToDescription(issueKey);
+    if (action === "rows-comment") await addIssueRowsToComment(issueKey);
     if (action === "move") await moveJiraIssue(issueKey);
     if (action === "comment") await commentOnJiraIssue(issueKey);
     if (action === "todo") await addTodoForJira(issueKey);
@@ -2896,20 +2898,58 @@ async function fetchJiraSprints() {
 }
 
 
-function copyIssueRows(issueKey) {
-  const rows = selectedSprintEntries().filter(e => (e.jiraIssue || "UNLINKED").trim().toUpperCase() === issueKey);
-  if (!rows.length) return;
-  const headers = ["Effort", "Description", "Date"];
-  const out = [];
-  rows.forEach(e => {
-    const minutes = e.end ? Math.max(0, mins(e.end) - mins(e.start)) : 0;
-    out.push([
-      effortPointsLabel(minutes),
+function issueRowsForJiraIssue(issueKey) {
+  const key = String(issueKey || "").trim().toUpperCase();
+  const rows = selectedSprintEntries().filter(e => (e.jiraIssue || "UNLINKED").trim().toUpperCase() === key);
+  return {
+    rows,
+    headers: ["Effort", "Description", "Date"],
+    values: rows.map(e => [
+      effortPointsLabel(e.end ? Math.max(0, mins(e.end) - mins(e.start)) : 0),
       issueWorkDescription(e),
       formatDisplayDate(e.date)
-    ]);
-  });
-  writeTableClipboard(headers, out).then(() => alert(`Copied ${rows.length} rows for ${issueKey}.`));
+    ])
+  };
+}
+
+function issueRowsText(issueKey) {
+  const data = issueRowsForJiraIssue(issueKey);
+  if (!data.rows.length) return "";
+  return [data.headers, ...data.values].map(row => row.join(" | ")).join("\n");
+}
+
+async function addIssueRowsToDescription(issueKey) {
+  const text = issueRowsText(issueKey);
+  if (!text) return alert("No worklog rows found for " + issueKey + " in the selected sprint.");
+  if (!window.confirm("Replace the Jira description for " + issueKey + " with its worklog rows?")) return;
+  try {
+    await jiraWorkerFetch("/jira/update?key=" + encodeURIComponent(issueKey), {
+      key: issueKey,
+      fields: { description: jiraAdfFromText(text) }
+    });
+    alert("Description updated for " + issueKey + ".");
+  } catch (err) {
+    alert("Could not update the description for " + issueKey + ": " + String(err.message || err));
+  }
+}
+
+async function addIssueRowsToComment(issueKey) {
+  const text = issueRowsText(issueKey);
+  if (!text) return alert("No worklog rows found for " + issueKey + " in the selected sprint.");
+  try {
+    await jiraWorkerFetch("/jira/comment?key=" + encodeURIComponent(issueKey), {
+      key: issueKey,
+      comment: text
+    });
+    alert("Worklog rows added as a comment to " + issueKey + ".");
+  } catch (err) {
+    alert("Could not add worklog rows to " + issueKey + ": " + String(err.message || err));
+  }
+}
+function copyIssueRows(issueKey) {
+  const data = issueRowsForJiraIssue(issueKey);
+  if (!data.rows.length) return;
+  writeTableClipboard(data.headers, data.values).then(() => alert(`Copied ${data.rows.length} rows for ${issueKey}.`));
 }
 
 function copyInternalRows() {
