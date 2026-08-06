@@ -26,6 +26,18 @@ const JIRA_REMEMBERED_PASSPHRASE_STORAGE_KEY = "worklog-jira-passphrase-v1";
 const PBI_HISTORY_STORAGE_KEY = "worklog-pbi-history-v1";
 const THEME_STORAGE_KEY = "worklog-theme";
 
+const JIRA_SCRUM_TEAM_URL = "https://malta-customs.atlassian.net/jira/people/team/439a8253-3b82-4dda-ad02-35c4eb8bf919?ref=jira$&src=issue";
+async function jiraScrumTeamCommentBody() {
+  const teamUrl = String(userJiraSettings.qaTeamUrl || JIRA_SCRUM_TEAM_URL).trim();
+  const data = await jiraWorkerFetch("/jira/team-members", { teamUrl });
+  const members = Array.isArray(data.members) ? data.members : [];
+  if (!members.length) throw new Error("The configured Jira team has no readable members.");
+  const teamName = String(data.name || userJiraSettings.qaTeamName || "Jira Team").trim();
+  const content = [{ type: "text", text: teamName, marks: [{ type: "link", attrs: { href: teamUrl } }] }, { type: "text", text: " (" }];
+  members.forEach((member, index) => { if (index) content.push({ type: "text", text: " " }); content.push({ type: "mention", attrs: { id: member.accountId, text: "@" + member.displayName, accessLevel: "" } }); });
+  content.push({ type: "text", text: ") for testing." });
+  return { type: "doc", version: 1, content: [{ type: "paragraph", content }] };
+}
 const el = {
   importBtn: document.getElementById("btn-import"),
   themeBtn: document.getElementById("btn-theme"),
@@ -106,8 +118,9 @@ const el = {
   jiraApiToken: document.getElementById("f-jira-api-token"),
   jiraPbiDraftUrl: document.getElementById("f-pbi-draft-url"),
   jiraUatApiUrl: document.getElementById("f-uat-api-url"),
-  jiraQaMentionAccountId: document.getElementById("f-qa-mention-account-id"),
   jiraStoryPointsFieldId: document.getElementById("f-story-points-field-id"),
+  jiraQaTeamUrl: document.getElementById("f-jira-qa-team-url"),
+  jiraQaTeamName: document.getElementById("f-jira-qa-team-name"),
   desktopSyncUid: document.getElementById("f-desktop-sync-uid"),
   jiraPassphrase: document.getElementById("f-jira-passphrase"),
   jiraPassphraseConfirm: document.getElementById("f-jira-passphrase-confirm"),
@@ -224,7 +237,9 @@ function emptyJiraSettings() {
     encryptedApiToken: null,
     pbiDraftUrl: String(cfg.pbiDraftUrl || "").trim(),
     uatApiUrl: String(cfg.uatApiUrl || "").trim(),
-    qaMentionAccountId: ""
+    storyPointsFieldId: "",
+    qaTeamUrl: String(cfg.qaTeamUrl || "").trim(),
+    qaTeamName: String(cfg.qaTeamName || "").trim()
   };
 }
 
@@ -337,8 +352,9 @@ function normalizeJiraSettings(raw) {
     encryptedApiToken,
     pbiDraftUrl: String(raw?.pbiDraftUrl || cfg.pbiDraftUrl || "").trim(),
     uatApiUrl: String(raw?.uatApiUrl || cfg.uatApiUrl || "").trim(),
-    qaMentionAccountId: String(raw?.qaMentionAccountId || "").trim(),
-    storyPointsFieldId: String(raw?.storyPointsFieldId || "").trim()
+    storyPointsFieldId: String(raw?.storyPointsFieldId || "").trim(),
+    qaTeamUrl: String(raw?.qaTeamUrl || cfg.qaTeamUrl || "").trim(),
+    qaTeamName: String(raw?.qaTeamName || cfg.qaTeamName || "").trim()
   };
 }
 
@@ -479,8 +495,9 @@ function fillJiraSettingsForm() {
   el.jiraApiToken.value = "";
   el.jiraPbiDraftUrl.value = settings.pbiDraftUrl || "";
   el.jiraUatApiUrl.value = settings.uatApiUrl || "";
-  el.jiraQaMentionAccountId.value = settings.qaMentionAccountId || "";
   el.jiraStoryPointsFieldId.value = settings.storyPointsFieldId || "";
+  el.jiraQaTeamUrl.value = settings.qaTeamUrl || "";
+  el.jiraQaTeamName.value = settings.qaTeamName || "";
   el.desktopSyncUid.value = currentUser?.uid || "";
   el.jiraPassphrase.value = "";
   el.jiraPassphraseConfirm.value = "";
@@ -565,8 +582,9 @@ async function saveJiraSettings(evt) {
       email: el.jiraEmail.value,
       pbiDraftUrl: el.jiraPbiDraftUrl.value,
       uatApiUrl: el.jiraUatApiUrl.value,
-      qaMentionAccountId: el.jiraQaMentionAccountId.value,
       storyPointsFieldId: el.jiraStoryPointsFieldId.value,
+      qaTeamUrl: el.jiraQaTeamUrl.value,
+      qaTeamName: el.jiraQaTeamName.value,
       apiToken: userJiraSettings.apiToken,
       encryptedApiToken: userJiraSettings.encryptedApiToken
     });
@@ -629,7 +647,9 @@ async function saveJiraSettings(evt) {
       email: baseSettings.email,
       pbiDraftUrl: baseSettings.pbiDraftUrl,
       uatApiUrl: baseSettings.uatApiUrl,
-      qaMentionAccountId: baseSettings.qaMentionAccountId,
+      qaTeamUrl: baseSettings.qaTeamUrl,
+      qaTeamName: baseSettings.qaTeamName,
+
       encryptedApiToken,
       updatedAt: serverTimestamp()
     });
@@ -2776,13 +2796,11 @@ function chooseJiraTransition(issueKey, transitions, currentStatus = "") {
 }
 
 async function addQaTestingMentionComment(issueKey) {
-  const accountId = String(userJiraSettings.qaMentionAccountId || "").trim();
-  if (!accountId) return false;
   try {
-    await jiraWorkerFetch("/jira/comment?key=" + encodeURIComponent(issueKey), { key: issueKey, mentionAccountId: accountId, mentionText: "@Scrum Team for QA Testing", comment: "@Scrum Team for QA Testing" });
+    await jiraWorkerFetch("/jira/comment?key=" + encodeURIComponent(issueKey), { key: issueKey, commentBody: await jiraScrumTeamCommentBody(), comment: "Scrum Team for QA Testing" });
     return true;
   } catch (err) {
-    console.warn("Could not add QA testing mention to", issueKey, err);
+    console.warn("Could not add Scrum Team QA testing comment to", issueKey, err);
     return false;
   }
 }
@@ -2809,7 +2827,7 @@ async function moveJiraIssue(issueKey) {
     const movedFromInProgress = String(currentStatus || "").trim().toLowerCase() === "in progress";
     const qaMentionAdded = movedFromInProgress && movedToQaTesting ? await addQaTestingMentionComment(issueKey) : false;
     await fetchJiraIssues();
-    alert(issueKey + " moved to " + (transition.to || transition.name) + (movedToQaTesting && !qaMentionAdded ? ". QA mention was not added; configure the QA Testing Mention Account ID in Jira Settings." : "."));
+    alert(issueKey + " moved to " + (transition.to || transition.name) + (movedToQaTesting && !qaMentionAdded ? ". Scrum Team comment was not added." : "."));
   } catch (err) {
     alert("Could not move " + issueKey + ": " + String(err.message || err));
   }

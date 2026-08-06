@@ -240,13 +240,19 @@
       <label>UAT API Endpoint
         <input id="f-uat-api-url" type="url" placeholder="https://your-power-automate-endpoint/{issueKey}">
       </label>
-      <label>QA Testing Mention Account ID
-        <input id="f-qa-mention-account-id" placeholder="Atlassian account ID for Scrum Team for QA Testing">
-      </label>
       <label>Story Point Estimate Custom Field
         <input id="f-story-points-field-id" placeholder="customfield_10036" pattern="customfield_[0-9]+">
         <small class="muted">Optional. Leave blank to hide story points from the issue list and issue view.</small>
       </label>
+      <div class="grid2">
+        <label>QA Team URL
+          <input id="f-jira-qa-team-url" type="url" placeholder="https://your-company.atlassian.net/jira/people/team/{team-id}">
+          <small class="muted">Members are fetched from Jira when the QA comment is created.</small>
+        </label>
+        <label>QA Team Name (optional)
+          <input id="f-jira-qa-team-name" placeholder="Jira team name">
+        </label>
+      </div>
       <label>Desktop Sync Firebase UID
         <input id="f-desktop-sync-uid" readonly>
       </label>
