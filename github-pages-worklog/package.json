@@ -1,0 +1,14 @@
+{
+  "name": "worklog-github-pages",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Static work logger for GitHub Pages with Firebase auth/storage",
+  "scripts": {
+    "dev": "npx http-server . -p 4173 -c-1",
+    "check": "node --check app.js"
+  },
+  "devDependencies": {
+    "http-server": "^14.1.1"
+  }
+}
+
