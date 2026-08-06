@@ -3,6 +3,9 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChang
 import { getFirestore, collection, doc, getDoc, getDocs, setDoc, deleteDoc, writeBatch, serverTimestamp, query, orderBy } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-firestore.js";
 
 const cfg = window.WORKLOG_CONFIG || {};
+const TODO_PRIORITIES = ["Highest", "High", "Medium", "Low", "Lowest"];
+const TODO_PRIORITY_RANK = { Highest: 0, High: 1, Medium: 2, Low: 3, Lowest: 4 };
+const TODO_PRIORITY_RGB = { Highest: [139, 0, 0], High: [220, 38, 38], Medium: [249, 115, 22], Low: [37, 99, 235], Lowest: [6, 182, 212] };
 const TAGS = ["task", "story", "bug", "meeting", "support", "working-hours", "overtime", "other"];
 const PBI_ISSUE_TYPE_OPTIONS = [
   "Story",
@@ -101,6 +104,7 @@ const el = {
   todoEditId: document.getElementById("todo-edit-id"),
   todoEditText: document.getElementById("todo-edit-text"),
   todoEditJira: document.getElementById("todo-edit-jira"),
+  todoEditPriority: document.getElementById("todo-edit-priority"),
   todoEditCancel: document.getElementById("todo-edit-cancel"),
   slotTypeDialog: document.getElementById("slot-type-dialog"),
   slotTypeForm: document.getElementById("slot-type-form"),
@@ -1317,6 +1321,12 @@ function todoCanChange(todo) {
 function todoMatchesSelectedFinishedDate(todo, date = selectedTodoDate()) {
   return !!todo?.done && !!todo.completedDate && todo.completedDate === date;
 }
+function normalizeTodoPriority(value) { return TODO_PRIORITIES.includes(String(value || "").trim()) ? String(value).trim() : "Medium"; }
+function todoPriorityRank(todo) { return TODO_PRIORITY_RANK[normalizeTodoPriority(todo?.priority)] ?? TODO_PRIORITY_RANK.Medium; }
+function todoAgeDays(todo) { const time = Date.parse(todo?.createdAt || ""); return Number.isFinite(time) ? Math.min(7, Math.max(0, (Date.now() - time) / 86400000)) : 0; }
+function todoPriorityStyle(todo) { const base = TODO_PRIORITY_RGB[normalizeTodoPriority(todo?.priority)]; const lightness = Math.max(0, 0.78 - (todoAgeDays(todo) / 7) * 0.78); const rgb = base.map(channel => Math.round(channel + (255 - channel) * lightness)); return "--todo-priority-color: rgb(" + rgb.join(",") + ")"; }
+function sortedTodos(items) { return [...items].sort((a, b) => todoPriorityRank(a) - todoPriorityRank(b) || String(a.createdAt || "").localeCompare(String(b.createdAt || ""))); }
+function todoPriorityLabel(todo) { return normalizeTodoPriority(todo?.priority); }
 function normalizeTodos(items) {
   return Array.isArray(items)
     ? items.filter(item => item && typeof item.text === "string" && item.text.trim()).map(item => ({
@@ -1324,6 +1334,7 @@ function normalizeTodos(items) {
         text: item.text.trim(),
         done: !!item.done,
         jiraIssue: String(item.jiraIssue || "").trim().toUpperCase(),
+        priority: normalizeTodoPriority(item.priority),
         createdAt: String(item.createdAt || item.addedAt || ""),
         completedAt: item.done ? String(item.completedAt || item.finishedAt || item.closedAt || new Date().toISOString()) : "",
         completedDate: item.done ? String(item.completedDate || item.finishedDate || item.closedDate || localDateKey(item.completedAt || item.finishedAt || item.closedAt || new Date())).slice(0, 10) : ""
@@ -1370,8 +1381,8 @@ function renderTodos() {
   if (!list) return;
   const query = String(todoSearchQuery || "").trim().toLowerCase();
   const matchesSearch = todo => !query || [todo.text, todo.jiraIssue].some(value => String(value || "").toLowerCase().includes(query));
-  const visibleOpen = todos.filter(todo => !todo.done && matchesSearch(todo));
-  const visibleFinished = todos.filter(todo => todoMatchesSelectedFinishedDate(todo) && matchesSearch(todo));
+  const visibleOpen = sortedTodos(todos.filter(todo => !todo.done && matchesSearch(todo)));
+  const visibleFinished = sortedTodos(todos.filter(todo => todoMatchesSelectedFinishedDate(todo) && matchesSearch(todo)));
   const remaining = visibleOpen.length;
   const completed = todos.filter(todo => todo.done).length;
   const viewingToday = selectedTodoDate() === localDateKey();
@@ -1380,7 +1391,7 @@ function renderTodos() {
   clear.hidden = true;
   progress.style.width = todos.length ? `${Math.round((completed / todos.length) * 100)}%` : "0%";
   list.innerHTML = visibleOpen.map(todo => `
-    <li class="todo-item">
+    <li class="todo-item" style="${todoPriorityStyle(todo)}">
       <label class="todo-check-label"><input type="checkbox" data-todo-action="toggle" data-todo-id="${todo.id}"><span class="todo-checkbox" aria-hidden="true">✓</span><span class="todo-text-wrap"><span class="todo-text">${escapeHtml(todo.text)}${todo.jiraIssue ? ` <span class="badge todo-jira" data-jira-issue="${escapeHtml(todo.jiraIssue)}">${escapeHtml(todo.jiraIssue)}</span>` : ""}</span>${todo.createdAt ? `<span class="todo-meta">Added ${escapeHtml(localDateTimeLabel(todo.createdAt))}</span>` : ""}</span></label>
       <button class="todo-edit" type="button" data-todo-action="edit" data-todo-id="${todo.id}" aria-label="Edit todo">✎</button><button class="todo-delete" type="button" data-todo-action="delete" data-todo-id="${todo.id}" aria-label="Delete todo">×</button>
     </li>`).join("");
@@ -1390,7 +1401,7 @@ function renderTodos() {
     finishedList.innerHTML = visibleFinished.map(todo => {
       const locked = todoIsLocked(todo);
       const canUndo = !locked;
-      return `<li class="todo-item done${locked ? " locked" : ""}">
+      return `<li class="todo-item done${locked ? " locked" : ""}" style="${todoPriorityStyle(todo)}">
         <label class="todo-check-label">${canUndo ? `<input type="checkbox" data-todo-action="toggle" data-todo-id="${todo.id}" checked>` : ""}<span class="todo-checkbox" aria-hidden="true">✓</span><span class="todo-text-wrap"><span class="todo-text">${escapeHtml(todo.text)}${todo.jiraIssue ? ` <span class="badge todo-jira" data-jira-issue="${escapeHtml(todo.jiraIssue)}">${escapeHtml(todo.jiraIssue)}</span>` : ""}</span>${todo.createdAt ? `<span class="todo-meta">Added ${escapeHtml(localDateTimeLabel(todo.createdAt))}</span>` : ""}<span class="todo-meta">Finished ${escapeHtml(localDateTimeLabel(todo.completedAt || todo.completedDate))}${locked ? " · locked" : " · can undo today"}</span></span></label>
       </li>`;
     }).join("");
@@ -1402,6 +1413,7 @@ function openTodoEditDialog(todo) {
   el.todoEditId.value = todo.id;
   el.todoEditText.value = todo.text || "";
   el.todoEditJira.value = todo.jiraIssue || "";
+  el.todoEditPriority.value = normalizeTodoPriority(todo.priority);
   el.todoEditDialog.showModal();
 }
 
@@ -1409,6 +1421,7 @@ function wireTodoEvents() {
   const form = document.getElementById("todo-form");
   const input = document.getElementById("todo-input");
   const jiraInput = document.getElementById("todo-jira");
+  const priorityInput = document.getElementById("todo-priority");
   const list = document.getElementById("todo-list");
   const finishedList = document.getElementById("todo-finished-list");
   const clear = document.getElementById("todo-clear");
@@ -1435,9 +1448,10 @@ function wireTodoEvents() {
     const text = input.value.trim();
     if (!text) return;
     const jiraIssue = String(jiraInput?.value || "").trim().toUpperCase();
-    todos.unshift({ id: crypto.randomUUID(), text, jiraIssue, done: false, createdAt: new Date().toISOString(), completedAt: "", completedDate: "" });
+    todos.unshift({ id: crypto.randomUUID(), text, jiraIssue, priority: normalizeTodoPriority(priorityInput?.value), done: false, createdAt: new Date().toISOString(), completedAt: "", completedDate: "" });
     input.value = "";
     if (jiraInput) jiraInput.value = "";
+    if (priorityInput) priorityInput.value = "Medium";
     saveTodos(); renderTodos();
   });
   list.addEventListener("change", handleTodoToggle);
@@ -1471,6 +1485,7 @@ function wireTodoEvents() {
     if (!text) return;
     todoBeingEdited.text = text;
     todoBeingEdited.jiraIssue = el.todoEditJira.value.trim().toUpperCase();
+    todoBeingEdited.priority = normalizeTodoPriority(el.todoEditPriority.value);
     saveTodos(); renderTodos();
     todoBeingEdited = null;
     el.todoEditDialog.close();

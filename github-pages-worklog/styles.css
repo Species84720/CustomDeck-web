@@ -437,3 +437,5 @@ html[data-theme="light"] .jira-transition-option:focus-visible { background:colo
 .jira-transition-option { display:flex; align-items:baseline; justify-content:space-between; gap:12px; width:100%; padding:12px 14px; border:1px solid var(--border); border-radius:8px; background:var(--panel,#172033); color:var(--text); cursor:pointer; text-align:left; font:inherit; }
 .jira-transition-option:hover, .jira-transition-option:focus-visible { border-color:var(--accent); background:color-mix(in srgb, var(--accent) 16%, var(--panel,#172033)); outline:none; }
 .jira-transition-option span { color:var(--muted); font-size:12px; }
+
+.todo-item{border-left:4px solid var(--todo-priority-color,#64748b);background:color-mix(in srgb,var(--todo-priority-color,#64748b) 12%,transparent)}.todo-form select{min-width:132px}
