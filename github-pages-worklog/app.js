@@ -2616,6 +2616,24 @@ function jiraAdfFromText(text) {
   })) };
 }
 
+function jiraAdfTableFromRows(headers, rows) {
+  const cell = (type, value) => ({
+    type,
+    content: [{ type: "paragraph", content: [{ type: "text", text: String(value ?? "") }] }]
+  });
+  return {
+    type: "doc",
+    version: 1,
+    content: [{
+      type: "table",
+      attrs: { isNumberColumnEnabled: false, layout: "default" },
+      content: [
+        { type: "tableRow", content: headers.map(header => cell("tableHeader", header)) },
+        ...rows.map(row => ({ type: "tableRow", content: row.map(value => cell("tableCell", value)) }))
+      ]
+    }]
+  };
+}
 function pbiJiraFieldSpecs(issue) {
   const type = normalizePbiIssueType(issue?.fields?.issuetype?.name || issue?.fields?.issuetype || issue?.issuetype).toLowerCase();
   const specs = [
@@ -2939,13 +2957,13 @@ function issueRowsText(issueKey) {
 }
 
 async function addIssueRowsToDescription(issueKey) {
-  const text = issueRowsText(issueKey);
-  if (!text) return alert("No worklog rows found for " + issueKey + " in the selected sprint.");
+  const data = issueRowsForJiraIssue(issueKey);
+  if (!data.rows.length) return alert("No worklog rows found for " + issueKey + " in the selected sprint.");
   if (!window.confirm("Replace the Jira description for " + issueKey + " with its worklog rows?")) return;
   try {
     await jiraWorkerFetch("/jira/update?key=" + encodeURIComponent(issueKey), {
       key: issueKey,
-      fields: { description: jiraAdfFromText(text) }
+      fields: { description: jiraAdfTableFromRows(data.headers, data.values) }
     });
     alert("Description updated for " + issueKey + ".");
   } catch (err) {
@@ -2954,19 +2972,18 @@ async function addIssueRowsToDescription(issueKey) {
 }
 
 async function addIssueRowsToComment(issueKey) {
-  const text = issueRowsText(issueKey);
-  if (!text) return alert("No worklog rows found for " + issueKey + " in the selected sprint.");
+  const data = issueRowsForJiraIssue(issueKey);
+  if (!data.rows.length) return alert("No worklog rows found for " + issueKey + " in the selected sprint.");
   try {
     await jiraWorkerFetch("/jira/comment?key=" + encodeURIComponent(issueKey), {
       key: issueKey,
-      comment: text
+      commentBody: jiraAdfTableFromRows(data.headers, data.values)
     });
     alert("Worklog rows added as a comment to " + issueKey + ".");
   } catch (err) {
     alert("Could not add worklog rows to " + issueKey + ": " + String(err.message || err));
   }
-}
-function copyIssueRows(issueKey) {
+}function copyIssueRows(issueKey) {
   const data = issueRowsForJiraIssue(issueKey);
   if (!data.rows.length) return;
   writeTableClipboard(data.headers, data.values).then(() => alert(`Copied ${data.rows.length} rows for ${issueKey}.`));
