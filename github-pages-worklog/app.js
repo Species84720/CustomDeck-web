@@ -1373,6 +1373,9 @@ function renderTodos() {
   const empty = document.getElementById("todo-empty");
   const count = document.getElementById("todo-count");
   const clear = document.getElementById("todo-clear");
+  const addButton = document.getElementById("todo-add-button");
+  const addDialog = document.getElementById("todo-add-dialog");
+  const addCancel = document.getElementById("todo-add-cancel");
   const search = document.getElementById("todo-search");
   const progress = document.getElementById("todo-progress-bar");
   const finishedSection = document.getElementById("todo-finished-section");
@@ -1418,13 +1421,16 @@ function openTodoEditDialog(todo) {
 }
 
 function wireTodoEvents() {
-  const form = document.getElementById("todo-form");
+  const form = document.getElementById("todo-add-form");
   const input = document.getElementById("todo-input");
   const jiraInput = document.getElementById("todo-jira");
   const priorityInput = document.getElementById("todo-priority");
   const list = document.getElementById("todo-list");
   const finishedList = document.getElementById("todo-finished-list");
   const clear = document.getElementById("todo-clear");
+  const addButton = document.getElementById("todo-add-button");
+  const addDialog = document.getElementById("todo-add-dialog");
+  const addCancel = document.getElementById("todo-add-cancel");
   const search = document.getElementById("todo-search");
   const handleTodoToggle = event => {
     const control = event.target;
@@ -1443,6 +1449,8 @@ function wireTodoEvents() {
     }
     saveTodos(); renderTodos();
   };
+  addButton?.addEventListener("click", () => { addDialog?.showModal(); input?.focus(); });
+  addCancel?.addEventListener("click", () => addDialog?.close());
   form.addEventListener("submit", event => {
     event.preventDefault();
     const text = input.value.trim();

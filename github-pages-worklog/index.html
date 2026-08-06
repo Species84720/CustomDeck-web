@@ -98,8 +98,7 @@
     </div>
     <div class="focus-sidebar">
     <aside class="todo-panel card" aria-labelledby="todo-title">
-      <div class="todo-header"><div><span class="eyebrow">Focus</span><h2 id="todo-title">My todo list</h2></div><div class="todo-header-actions"><input id="todo-search" type="search" placeholder="Search todos..." aria-label="Search todos"><button class="btn primary todo-add" type="submit" form="todo-form" aria-label="Add todo">+</button><span id="todo-count" class="todo-count">0 left</span></div></div>
-      <form id="todo-form" class="todo-form"><textarea id="todo-input" rows="3" maxlength="500" placeholder="What needs doing?" aria-label="New todo description" required></textarea><input id="todo-jira" type="text" maxlength="32" placeholder="Jira key (optional)" aria-label="Jira issue key"><select id="todo-priority" aria-label="Todo priority"><option>Highest</option><option>High</option><option selected>Medium</option><option>Low</option><option>Lowest</option></select></form>
+      <div class="todo-header"><div><span class="eyebrow">Focus</span><h2 id="todo-title">My todo list</h2></div><div class="todo-header-actions"><input id="todo-search" type="search" placeholder="Search todos..." aria-label="Search todos"><button id="todo-add-button" class="btn primary todo-add" type="button" aria-label="Add todo">+</button><span id="todo-count" class="todo-count">0 left</span></div></div>
       <div class="todo-progress" aria-hidden="true"><span id="todo-progress-bar"></span></div>
       <div class="todo-section-label">Open todos</div>
       <ul id="todo-list" class="todo-list"></ul>
@@ -173,7 +172,22 @@
     </form>
   </dialog>
 
-  <dialog id="todo-edit-dialog">
+  <dialog id="todo-add-dialog">
+    <form id="todo-add-form" method="dialog">
+      <h2>Add to-do item</h2>
+      <label>Description
+        <textarea id="todo-input" rows="5" maxlength="500" placeholder="What needs doing?" aria-label="New todo description" required></textarea>
+      </label>
+      <label>Jira issue
+        <input id="todo-jira" maxlength="32" placeholder="Optional issue key" aria-label="Jira issue key">
+      </label>
+      <label>Priority
+        <select id="todo-priority" aria-label="Todo priority"><option>Highest</option><option>High</option><option selected>Medium</option><option>Low</option><option>Lowest</option></select>
+      </label>
+      <menu><button type="button" id="todo-add-cancel" class="btn">Cancel</button><button type="submit" class="btn primary">Add</button></menu>
+    </form>
+  </dialog>
+    <dialog id="todo-edit-dialog">
     <form id="todo-edit-form" method="dialog">
       <h2>Edit to-do item</h2>
       <input id="todo-edit-id" type="hidden">

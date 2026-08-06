@@ -304,10 +304,10 @@ body { background-color:#080b14; background-image:radial-gradient(circle at 12% 
 .stat-violet{border-top-color:#886dff}.stat-violet .stat-icon{background:#7c5cff22;color:#a994ff}.stat-blue{border-top-color:#458cff}.stat-blue .stat-icon{background:#458cff22;color:#74a9ff}.stat-green{border-top-color:#31ce80}.stat-green .stat-icon{background:#31ce8022;color:#51df96}.stat-amber{border-top-color:#f4aa3b}.stat-amber .stat-icon{background:#f4aa3b22;color:#ffc15f}.stat-cyan{border-top-color:#32c8e6}.stat-cyan .stat-icon{background:#32c8e622;color:#5cdcf4}.stat-rose{border-top-color:#ef6084}.stat-rose .stat-icon{background:#ef608422;color:#ff7f9f}
 .todo-panel,.sprint-issues-panel { padding:18px;overflow:hidden; }
 .todo-panel::before { content:"";position:absolute;width:150px;height:150px;right:-70px;top:-80px;border-radius:50%;background:#7c5cff22;filter:blur(4px);pointer-events:none; }
-.todo-header { display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:16px; }.todo-header-actions{display:flex;align-items:center;gap:7px;min-width:0}.todo-header-actions input{width:140px;min-width:0}.todo-form textarea{width:100%;resize:vertical;min-height:72px}
+.todo-header { display:flex;flex-direction:column;align-items:stretch;gap:8px;margin-bottom:16px; }.todo-header-actions{display:flex;align-items:center;justify-content:flex-end;gap:7px;min-width:0;width:100%}.todo-header-actions input{width:140px;min-width:0}
 .todo-count { border:1px solid #4d3d83;background:#251e45;color:#bdadff;border-radius:999px;padding:3px 9px;font-size:11px;font-weight:700; }
-.todo-form { display:grid;grid-template-columns:minmax(0,1fr) 132px;gap:7px; }
-.todo-form input { width:100%;min-width:0; }.todo-add{padding:0;font-size:21px}
+
+.todo-add{padding:0;font-size:21px}
 .todo-progress { height:3px;margin:13px 0 15px;border-radius:4px;overflow:hidden;background:#252b3c; }.todo-progress span{display:block;height:100%;width:0;border-radius:inherit;background:linear-gradient(90deg,#7c5cff,#32d6c4);transition:width .25s ease}
 .todo-section-label { margin:0 0 8px; color:var(--muted); font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
 .todo-list { display:grid;gap:7px;list-style:none;margin:0;padding:0;max-height:calc(100vh - 310px);overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain; }
@@ -430,7 +430,7 @@ html[data-theme="light"] .jira-transition-option:focus-visible { background:colo
 .jira-context-menu button { border:0;background:transparent;color:var(--text);padding:7px 12px;text-align:left;border-radius:5px;cursor:pointer;font:inherit;white-space:nowrap; }
 .jira-context-menu button:hover { background:var(--accent);color:white; }
 .todo-jira { margin-left:5px; }
-@media(max-width:700px){.todo-header-actions input{width:110px}.todo-form{grid-template-columns:1fr}}
+@media(max-width:700px){.todo-header-actions input{width:110px}}
 .jira-editable-label { color:var(--accent);font-size:10px;text-transform:none;letter-spacing:0; }
 
 .jira-transition-options { display:grid; gap:8px; margin-top:4px; }
@@ -438,4 +438,4 @@ html[data-theme="light"] .jira-transition-option:focus-visible { background:colo
 .jira-transition-option:hover, .jira-transition-option:focus-visible { border-color:var(--accent); background:color-mix(in srgb, var(--accent) 16%, var(--panel,#172033)); outline:none; }
 .jira-transition-option span { color:var(--muted); font-size:12px; }
 
-.todo-item{border-left:4px solid var(--todo-priority-color,#64748b);background:color-mix(in srgb,var(--todo-priority-color,#64748b) 12%,transparent)}.todo-form select{min-width:132px}
+.todo-item{border-left:4px solid var(--todo-priority-color,#64748b);background:color-mix(in srgb,var(--todo-priority-color,#64748b) 12%,transparent)}
