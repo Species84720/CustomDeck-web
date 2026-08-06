@@ -106,6 +106,7 @@ const el = {
   jiraApiToken: document.getElementById("f-jira-api-token"),
   jiraPbiDraftUrl: document.getElementById("f-pbi-draft-url"),
   jiraUatApiUrl: document.getElementById("f-uat-api-url"),
+  jiraQaMentionAccountId: document.getElementById("f-qa-mention-account-id"),
   desktopSyncUid: document.getElementById("f-desktop-sync-uid"),
   jiraPassphrase: document.getElementById("f-jira-passphrase"),
   jiraPassphraseConfirm: document.getElementById("f-jira-passphrase-confirm"),
@@ -221,7 +222,8 @@ function emptyJiraSettings() {
     apiToken: "",
     encryptedApiToken: null,
     pbiDraftUrl: String(cfg.pbiDraftUrl || "").trim(),
-    uatApiUrl: String(cfg.uatApiUrl || "").trim()
+    uatApiUrl: String(cfg.uatApiUrl || "").trim(),
+    qaMentionAccountId: ""
   };
 }
 
@@ -333,7 +335,8 @@ function normalizeJiraSettings(raw) {
     apiToken: String(raw?.apiToken || raw?.jiraApiToken || "").trim(),
     encryptedApiToken,
     pbiDraftUrl: String(raw?.pbiDraftUrl || cfg.pbiDraftUrl || "").trim(),
-    uatApiUrl: String(raw?.uatApiUrl || cfg.uatApiUrl || "").trim()
+    uatApiUrl: String(raw?.uatApiUrl || cfg.uatApiUrl || "").trim(),
+    qaMentionAccountId: String(raw?.qaMentionAccountId || "").trim()
   };
 }
 
@@ -474,6 +477,7 @@ function fillJiraSettingsForm() {
   el.jiraApiToken.value = "";
   el.jiraPbiDraftUrl.value = settings.pbiDraftUrl || "";
   el.jiraUatApiUrl.value = settings.uatApiUrl || "";
+  el.jiraQaMentionAccountId.value = settings.qaMentionAccountId || "";
   el.desktopSyncUid.value = currentUser?.uid || "";
   el.jiraPassphrase.value = "";
   el.jiraPassphraseConfirm.value = "";
@@ -558,6 +562,7 @@ async function saveJiraSettings(evt) {
       email: el.jiraEmail.value,
       pbiDraftUrl: el.jiraPbiDraftUrl.value,
       uatApiUrl: el.jiraUatApiUrl.value,
+      qaMentionAccountId: el.jiraQaMentionAccountId.value,
       apiToken: userJiraSettings.apiToken,
       encryptedApiToken: userJiraSettings.encryptedApiToken
     });
@@ -620,6 +625,7 @@ async function saveJiraSettings(evt) {
       email: baseSettings.email,
       pbiDraftUrl: baseSettings.pbiDraftUrl,
       uatApiUrl: baseSettings.uatApiUrl,
+      qaMentionAccountId: baseSettings.qaMentionAccountId,
       encryptedApiToken,
       updatedAt: serverTimestamp()
     });
@@ -2734,6 +2740,17 @@ function chooseJiraTransition(issueKey, transitions, currentStatus = "") {
   });
 }
 
+async function addQaTestingMentionComment(issueKey) {
+  const accountId = String(userJiraSettings.qaMentionAccountId || "").trim();
+  if (!accountId) return false;
+  try {
+    await jiraWorkerFetch("/jira/comment?key=" + encodeURIComponent(issueKey), { key: issueKey, mentionAccountId: accountId, mentionText: "@Scrum Team for QA Testing", comment: "@Scrum Team for QA Testing" });
+    return true;
+  } catch (err) {
+    console.warn("Could not add QA testing mention to", issueKey, err);
+    return false;
+  }
+}
 async function moveJiraIssue(issueKey) {
   try {
     const [transitionData, issueData] = await Promise.all([
@@ -2753,8 +2770,11 @@ async function moveJiraIssue(issueKey) {
       key: issueKey,
       transitionId: transition.id
     });
+    const movedToQaTesting = String(transition.to || "").trim().toLowerCase() === "qa testing";
+    const movedFromInProgress = String(currentStatus || "").trim().toLowerCase() === "in progress";
+    const qaMentionAdded = movedFromInProgress && movedToQaTesting ? await addQaTestingMentionComment(issueKey) : false;
     await fetchJiraIssues();
-    alert(issueKey + " moved to " + (transition.to || transition.name) + ".");
+    alert(issueKey + " moved to " + (transition.to || transition.name) + (movedToQaTesting && !qaMentionAdded ? ". QA mention was not added; configure the QA Testing Mention Account ID in Jira Settings." : "."));
   } catch (err) {
     alert("Could not move " + issueKey + ": " + String(err.message || err));
   }
