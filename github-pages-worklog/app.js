@@ -647,6 +647,7 @@ async function saveJiraSettings(evt) {
       email: baseSettings.email,
       pbiDraftUrl: baseSettings.pbiDraftUrl,
       uatApiUrl: baseSettings.uatApiUrl,
+      storyPointsFieldId: baseSettings.storyPointsFieldId,
       qaTeamUrl: baseSettings.qaTeamUrl,
       qaTeamName: baseSettings.qaTeamName,
 
