@@ -460,3 +460,11 @@ html[data-theme="light"] .select2-container--default .select2-results__option--h
   background:var(--accent);
   color:#fff;
 }
+html:not([data-theme="light"]) .select2-container--default .select2-selection--single {
+  background-color:var(--card-2) !important;
+  color:var(--text) !important;
+}
+html[data-theme="light"] .select2-container--default .select2-selection--single {
+  background-color:#fff !important;
+  color:var(--text) !important;
+}
