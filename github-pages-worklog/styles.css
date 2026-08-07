@@ -441,3 +441,22 @@ html[data-theme="light"] .jira-transition-option:focus-visible { background:colo
 .todo-item{border-left:4px solid var(--todo-priority-color,#64748b);background:color-mix(in srgb,var(--todo-priority-color,#64748b) 12%,transparent)}
 
 .select2-container{font-size:13px}.select2-container--default .select2-selection--single{height:38px;background:var(--card-2);border:1px solid var(--border);border-radius:8px;color:var(--text)}.select2-container--default .select2-selection--single .select2-selection__rendered{color:var(--text);line-height:36px}.select2-container--default .select2-selection--single .select2-selection__arrow{height:36px}.select2-dropdown{background:var(--panel);border-color:var(--border);color:var(--text)}.select2-container--default .select2-results__option{padding:8px 10px;color:var(--text)}.select2-container--default .select2-results__option--highlighted[aria-selected]{background:var(--accent);color:#fff}.select2-search--dropdown .select2-search__field{background:var(--card-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px}html[data-theme="light"] .select2-container--default .select2-selection--single,html[data-theme="light"] .select2-search--dropdown .select2-search__field{background:#fff;color:var(--text)}html[data-theme="light"] .select2-dropdown{background:var(--panel);color:var(--text)}
+/* Select2 is rendered dynamically and the CDN stylesheet has higher specificity. */
+html:not([data-theme="light"]) .select2-container--default .select2-dropdown,
+html:not([data-theme="light"]) .select2-container--default .select2-results,
+html:not([data-theme="light"]) .select2-container--default .select2-results__option,
+html:not([data-theme="light"]) .select2-container--default .select2-search--dropdown .select2-search__field {
+  background:var(--panel);
+  color:var(--text);
+}
+html[data-theme="light"] .select2-container--default .select2-dropdown,
+html[data-theme="light"] .select2-container--default .select2-results,
+html[data-theme="light"] .select2-container--default .select2-results__option {
+  background:var(--panel);
+  color:var(--text);
+}
+html:not([data-theme="light"]) .select2-container--default .select2-results__option--highlighted[aria-selected],
+html[data-theme="light"] .select2-container--default .select2-results__option--highlighted[aria-selected] {
+  background:var(--accent);
+  color:#fff;
+}
