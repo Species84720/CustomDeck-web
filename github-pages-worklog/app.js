@@ -1739,7 +1739,8 @@ function setJiraIssueSelectValue(issueKey) {
     el.jiraSelect.appendChild(option);
   }
   el.jiraSelect.value = key;
-  if (window.jQuery && window.jQuery.fn?.select2) window.jQuery(el.jiraSelect).trigger("change.select2");
+  initJiraIssueSelect();
+  if (window.jQuery && window.jQuery.fn?.select2) window.jQuery(el.jiraSelect).trigger("change");
 }
 function updateJiraDropdown() {
   if (!el.jiraSelect) return;
@@ -1754,7 +1755,7 @@ function updateJiraDropdown() {
   });
   el.jiraSelect.value = cur;
   initJiraIssueSelect();
-  if (window.jQuery && window.jQuery.fn?.select2) window.jQuery(el.jiraSelect).trigger("change.select2");
+  if (window.jQuery && window.jQuery.fn?.select2) window.jQuery(el.jiraSelect).trigger("change");
   renderCurrentSprintIssues();
 }
 function jiraIssueStatus(issue) {
@@ -2575,7 +2576,7 @@ async function saveEntry(evt) {
     start: el.start.value,
     end: endValue,
     tag: el.tag.value || "other",
-    jiraIssue: (el.jira.value || "").trim().toUpperCase(),
+    jiraIssue: String(el.jiraSelect?.value || el.jira.value || "").trim().toUpperCase(),
     jiraLogged: !!el.jiraLogged.checked,
     noJira: !!el.noJira.checked,
     isOvertime: !!el.overtime.checked,
@@ -2931,7 +2932,8 @@ async function moveNewBlockJiraIssueToInProgress(issueKey) {
     console.warn("Could not move new block Jira issue to In Progress", key, err);
     return false;
   }
-}async function commentOnJiraIssue(issueKey) {
+}
+async function commentOnJiraIssue(issueKey) {
   const comment = window.prompt("Comment on " + issueKey + " (you can include @ mentions):");
   if (comment === null || !comment.trim()) return;
   try {
@@ -3256,9 +3258,13 @@ function wireEvents() {
   el.jiraSettingsCancel.addEventListener("click", () => el.jiraSettingsDialog.close());
   el.jiraSettingsClear.addEventListener("click", clearJiraSettings);
   el.cancelBtn.addEventListener("click", () => el.dialog.close());
-  el.jiraSelect.addEventListener("change", () => {
-    if (el.jiraSelect.value) el.jira.value = el.jiraSelect.value;
-  });
+  const syncJiraSelectToInput = () => {
+    el.jira.value = el.jiraSelect.value || "";
+  };
+  el.jiraSelect.addEventListener("change", syncJiraSelectToInput);
+  if (window.jQuery && window.jQuery.fn?.select2) {
+    window.jQuery(el.jiraSelect).on("change.worklogJiraSelect", syncJiraSelectToInput);
+  }
   el.sprintIssuesList.addEventListener("click", event => {
     const issue = event.target.closest("[data-jira-issue]")?.dataset.jiraIssue;
     if (issue) openEditor(null, { jiraIssue: issue });
