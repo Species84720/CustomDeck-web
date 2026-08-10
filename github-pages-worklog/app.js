@@ -1891,6 +1891,7 @@ function openEditor(entry, defaults = null) {
   el.tag.value = editing ? (entry.tag || "other") : (preset.tag || "task");
   el.jira.value = editing ? (entry.jiraIssue || "") : (preset.jiraIssue || "");
   el.jiraSelect.value = "";
+  if (window.jQuery && window.jQuery.fn?.select2) window.jQuery(el.jiraSelect).trigger("change.select2");
   el.reason.value = editing ? (entry.reason || "Done") : "Done";
   el.overtime.checked = editing ? !!entry.isOvertime : !!preset.isOvertime;
   el.noJira.checked = editing ? !!entry.noJira : !!preset.noJira;
