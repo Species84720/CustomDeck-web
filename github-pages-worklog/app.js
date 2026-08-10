@@ -1728,6 +1728,19 @@ function initJiraIssueSelect() {
   }
 }
 
+function setJiraIssueSelectValue(issueKey) {
+  if (!el.jiraSelect) return;
+  const key = String(issueKey || "").trim().toUpperCase();
+  if (key && !Array.from(el.jiraSelect.options).some(option => option.value === key)) {
+    const issue = jiraIssueCache.find(item => String(item?.key || "").trim().toUpperCase() === key);
+    const option = document.createElement("option");
+    option.value = key;
+    option.textContent = issue ? key + " - " + (issue.summary || "").slice(0, 80) : key;
+    el.jiraSelect.appendChild(option);
+  }
+  el.jiraSelect.value = key;
+  if (window.jQuery && window.jQuery.fn?.select2) window.jQuery(el.jiraSelect).trigger("change.select2");
+}
 function updateJiraDropdown() {
   if (!el.jiraSelect) return;
   const cur = el.jiraSelect.value;
@@ -1889,9 +1902,9 @@ function openEditor(entry, defaults = null) {
   el.start.value = editing ? entry.start : (preset.start || "09:00");
   el.end.value = editing ? (entry.end || "") : (preset.end || "");
   el.tag.value = editing ? (entry.tag || "other") : (preset.tag || "task");
-  el.jira.value = editing ? (entry.jiraIssue || "") : (preset.jiraIssue || "");
-  el.jiraSelect.value = "";
-  if (window.jQuery && window.jQuery.fn?.select2) window.jQuery(el.jiraSelect).trigger("change.select2");
+  const selectedJiraIssue = editing ? (entry.jiraIssue || "") : (preset.jiraIssue || "");
+  el.jira.value = selectedJiraIssue;
+  setJiraIssueSelectValue(selectedJiraIssue);
   el.reason.value = editing ? (entry.reason || "Done") : "Done";
   el.overtime.checked = editing ? !!entry.isOvertime : !!preset.isOvertime;
   el.noJira.checked = editing ? !!entry.noJira : !!preset.noJira;
@@ -2896,15 +2909,20 @@ async function moveJiraIssue(issueKey) {
 
 async function moveNewBlockJiraIssueToInProgress(issueKey) {
   const key = String(issueKey || "").trim().toUpperCase();
-  const sprint = currentSprint();
-  const issue = jiraIssueCache.find(item => String(item?.key || "").trim().toUpperCase() === key);
-  if (!sprint || !issue || jiraIssueStatus(issue).trim().toLowerCase() !== "to do") return false;
+  if (!key) return false;
 
   try {
-    const data = await jiraWorkerFetch("/jira/transitions?key=" + encodeURIComponent(key), { key });
-    const transition = (data.transitions || []).find(item => String(item?.to || "").trim().toLowerCase() === "in progress");
+    const [issueData, transitionData] = await Promise.all([
+      jiraWorkerFetch("/jira/issue?key=" + encodeURIComponent(key), { key }),
+      jiraWorkerFetch("/jira/transitions?key=" + encodeURIComponent(key), { key })
+    ]);
+    const currentStatus = String(issueData.issue?.fields?.status?.name || "").trim().toLowerCase();
+    if (currentStatus !== "to do" && !currentStatus.includes("todo")) return false;
+
+    const transition = (transitionData.transitions || []).find(item => String(item?.to || "").trim().toLowerCase() === "in progress");
     if (!transition?.id) return false;
     await jiraWorkerFetch("/jira/transition?key=" + encodeURIComponent(key), { key, transitionId: transition.id });
+
     const cached = jiraIssueCache.find(item => String(item?.key || "").trim().toUpperCase() === key);
     if (cached) cached.status = "In Progress";
     updateJiraDropdown();
@@ -2913,8 +2931,7 @@ async function moveNewBlockJiraIssueToInProgress(issueKey) {
     console.warn("Could not move new block Jira issue to In Progress", key, err);
     return false;
   }
-}
-async function commentOnJiraIssue(issueKey) {
+}async function commentOnJiraIssue(issueKey) {
   const comment = window.prompt("Comment on " + issueKey + " (you can include @ mentions):");
   if (comment === null || !comment.trim()) return;
   try {
