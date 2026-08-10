@@ -69,3 +69,31 @@ dialog::backdrop { background:#050914bb; } dialog form { display:grid; gap:12px;
 .member-chip { padding:8px 10px; background:#101a2b; border:1px solid #21314e; border-radius:8px; color:var(--text); font-size:13px; overflow-wrap:anywhere; word-break:break-word; }
 .status.error { color:var(--danger); } .status { min-height:20px; font-size:12px; }
 @media(max-width:800px) { .shell { padding:12px; } .unlock-bar,.unlock-actions { align-items:stretch; flex-direction:column; } .unlock-actions input { width:100%; } .vault-action-buttons { width:100%; } .vault-action-buttons .button { flex:1 1 150px; } .library-grid,.content-grid,.library-grid.branches-collapsed,.content-grid.files-collapsed,.content-grid.props-collapsed,.content-grid.files-collapsed.props-collapsed { grid-template-columns:1fr; } .content-grid { height:auto; } .file-pane { border-right:0; border-bottom:1px solid var(--border); padding:0 0 10px; max-height:180px; } .canvas { height:520px; } .canvas-hint { left:12px; right:auto; } }
+.viewer-panel:fullscreen {
+  width:100vw;
+  height:100vh;
+  max-width:none;
+  border-radius:0;
+  padding:15px;
+  overflow:hidden;
+}
+.viewer-panel:fullscreen .content-grid,
+.viewer-panel.viewer-maximized .content-grid {
+  height:calc(100vh - 112px);
+}
+.viewer-panel.viewer-maximized {
+  position:fixed;
+  inset:0;
+  z-index:1000;
+  width:100vw;
+  height:100vh;
+  max-width:none;
+  border-radius:0;
+  padding:15px;
+  overflow:hidden;
+}
+body.viewer-is-maximized { overflow:hidden; }
+@media(max-width:800px) {
+  .viewer-panel:fullscreen .content-grid,
+  .viewer-panel.viewer-maximized .content-grid { height:calc(100vh - 170px); }
+}

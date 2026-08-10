@@ -13,7 +13,7 @@ const el = {
   fileList: $("file-list"), viewerStatus: $("viewer-status"), canvas: $("canvas"), diagramHost: $("diagram-host"), canvasEmpty: $("canvas-empty"),
   navigateUp: $("navigate-up"), navPath: $("nav-path"), toggleBranches: $("toggle-branches"), toggleBranchesToolbar: $("toggle-branches-toolbar"), toggleFiles: $("toggle-files"), toggleProps: $("toggle-props"),
   uploadOpen: $("upload-open"), shareOpen: $("share-open"), rotateOpen: $("rotate-open"),
-  zoomIn: $("zoom-in"), zoomOut: $("zoom-out"), zoomFit: $("zoom-fit"), propsPanel: $("props-panel"), propsContent: $("props-content"), uploadDialog: $("upload-dialog"),
+  zoomIn: $("zoom-in"), zoomOut: $("zoom-out"), zoomFit: $("zoom-fit"), toggleFullscreen: $("toggle-fullscreen"), viewerPanel: $("viewer-panel"), propsPanel: $("props-panel"), propsContent: $("props-content"), uploadDialog: $("upload-dialog"),
   uploadForm: $("upload-form"), uploadBranch: $("upload-branch"), uploadFiles: $("upload-files"),
   uploadCancel: $("upload-cancel"), uploadStatus: $("upload-status"),
   shareDialog: $("share-dialog"), shareForm: $("share-form"), shareBranchLabel: $("share-branch-label"), shareEmail: $("share-email"), shareMembers: $("share-members"), shareCancel: $("share-cancel"), shareStatus: $("share-status"),
@@ -459,6 +459,33 @@ function adjustZoom(factor) {
 function fitDiagram() {
   if (!viewer) return;
   viewer.get("canvas").zoom("fit-viewport");
+}
+function updateFullscreenButton() {
+  const active = document.fullscreenElement === el.viewerPanel || el.viewerPanel.classList.contains("viewer-maximized");
+  el.toggleFullscreen.textContent = active ? "Restore" : "Maximize";
+  el.toggleFullscreen.setAttribute("aria-label", active ? "Restore BPMN viewer size" : "Maximize BPMN viewer");
+  el.toggleFullscreen.classList.toggle("primary", active);
+  el.toggleFullscreen.classList.toggle("subtle", !active);
+  document.body.classList.toggle("viewer-is-maximized", active && document.fullscreenElement !== el.viewerPanel);
+}
+async function toggleViewerFullscreen() {
+  if (!el.viewerPanel) return;
+  try {
+    if (document.fullscreenElement === el.viewerPanel) {
+      await document.exitFullscreen();
+    } else if (document.fullscreenElement) {
+      await document.exitFullscreen();
+      await el.viewerPanel.requestFullscreen();
+    } else if (el.viewerPanel.requestFullscreen) {
+      await el.viewerPanel.requestFullscreen();
+    } else {
+      el.viewerPanel.classList.toggle("viewer-maximized");
+      updateFullscreenButton();
+    }
+  } catch (error) {
+    el.viewerPanel.classList.toggle("viewer-maximized");
+    updateFullscreenButton();
+  }
 }
 function touchDistance(touches) {
   if (touches.length < 2) return 0;
@@ -964,6 +991,9 @@ function wire() {
   el.zoomIn.onclick = () => adjustZoom(1.2);
   el.zoomOut.onclick = () => adjustZoom(1 / 1.2);
   el.zoomFit.onclick = fitDiagram;
+  el.toggleFullscreen.onclick = toggleViewerFullscreen;
+  document.addEventListener("fullscreenchange", updateFullscreenButton);
+  updateFullscreenButton();
   el.password.onkeydown = event => { if (event.key === "Enter") unlock(); };
   el.branchSearch.oninput = renderBranches;
   el.fileSearch.oninput = renderFiles;
