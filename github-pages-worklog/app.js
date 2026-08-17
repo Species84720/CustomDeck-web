@@ -165,7 +165,7 @@ const el = {
   cancelBtn: document.getElementById("btn-cancel")
 };
 
-const today = new Date().toISOString().slice(0, 10);
+let today = localDateKey();
 el.dayPicker.value = today;
 el.filterTag.innerHTML += TAGS.map(t => `<option value="${t}">${t}</option>`).join("");
 el.tag.innerHTML = TAGS.map(t => `<option value="${t}">${t}</option>`).join("");
@@ -196,6 +196,9 @@ let currentView = "day";
 let dragState = null;
 let suppressContextMenuUntil = 0;
 let dragSelectionGuardWired = false;
+let liveRefreshTimer = null;
+let liveRefreshPromise = null;
+let todayRefreshTimer = null;
 const TODO_STORAGE_KEY = "worklog-todos-v1";
 let todos = loadTodos();
 const QUICK_ACTION_KEYS = ["quickAction", "source", "id", "task", "note", "date", "start", "end", "tag", "jiraIssue", "jiraLogged", "noJira", "isOvertime", "location", "reason", "closePreviousId"];
@@ -1290,6 +1293,16 @@ function localDateTimeLabel(value) {
   if (Number.isNaN(date.getTime())) return String(value);
   return `${localDateKey(date)} ${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
 }
+function refreshCurrentDate() {
+  const nextToday = localDateKey();
+  if (nextToday === today) return false;
+  const wasShowingToday = el.dayPicker.value === today;
+  today = nextToday;
+  if (wasShowingToday) el.dayPicker.value = today;
+  updateSprintAutoOption();
+  render();
+  return true;
+}
 function beginDragSelectionGuard() {
   document.body.classList.add("is-dragging");
 }
@@ -1367,6 +1380,31 @@ async function loadCloudTodos() {
   } catch (err) {
     console.warn("Could not load to-dos from Firebase:", err);
   }
+}
+async function refreshLiveData() {
+  if (!currentUser || !db || liveRefreshPromise) return liveRefreshPromise;
+  liveRefreshPromise = (async () => {
+    refreshCurrentDate();
+    await Promise.all([loadCloudTodos(), loadEntries(), fetchJiraSprints()]);
+    await fetchJiraIssues();
+    updateSprintAutoOption();
+    render();
+  })().catch(err => console.warn("Could not refresh live worklog data:", err)).finally(() => {
+    liveRefreshPromise = null;
+  });
+  return liveRefreshPromise;
+}
+function stopLiveRefresh() {
+  if (liveRefreshTimer) window.clearInterval(liveRefreshTimer);
+  if (todayRefreshTimer) window.clearInterval(todayRefreshTimer);
+  liveRefreshTimer = null;
+  todayRefreshTimer = null;
+  liveRefreshPromise = null;
+}
+function startLiveRefresh() {
+  stopLiveRefresh();
+  liveRefreshTimer = window.setInterval(() => refreshLiveData(), 30000);
+  todayRefreshTimer = window.setInterval(() => refreshCurrentDate(), 30000);
 }
 function renderTodos() {
   const list = document.getElementById("todo-list");
@@ -1837,7 +1875,8 @@ async function ensureJiraIssueCached(issueKey) {
 }
 
 function currentSprint() {
-  return sprintCache.find(s => s.start <= today && s.end >= today) || null;
+  const currentDate = localDateKey();
+  return sprintCache.find(s => s.start <= currentDate && s.end >= currentDate) || null;
 }
 
 function renderCurrentSprintIssues(message = "") {
@@ -3404,6 +3443,7 @@ async function boot() {
     el.copyExcelBtn.disabled = !signedIn;
     el.authLabel.textContent = signedIn ? `Signed in as ${user.email}` : (quickActionState.pending ? "Quick action ready — sign in to submit it" : "Not signed in");
     if (!signedIn) {
+      stopLiveRefresh();
       userJiraSettings = emptyJiraSettings();
       jiraUnlockSource = "";
       resetJiraCaches();
@@ -3416,6 +3456,7 @@ async function boot() {
     await loadJiraSettings();
     await Promise.all([loadEntries(), fetchJiraSprints()]);
     await fetchJiraIssues();
+    startLiveRefresh();
     await applyQuickActionIfNeeded();
     updateSprintAutoOption();
     updateJiraStatus();
@@ -3423,4 +3464,7 @@ async function boot() {
   });
 }
 
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && currentUser) refreshLiveData();
+});
 boot();
