@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-auth.js";
-import { getFirestore, collection, doc, getDoc, getDocs, setDoc, deleteDoc, writeBatch, serverTimestamp, query, orderBy } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-firestore.js";
+import { getFirestore, collection, doc, getDoc, setDoc, deleteDoc, writeBatch, serverTimestamp, onSnapshot } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-firestore.js";
 
 const cfg = window.WORKLOG_CONFIG || {};
 const TODO_PRIORITIES = ["Highest", "High", "Medium", "Low", "Lowest"];
@@ -199,6 +199,8 @@ let dragSelectionGuardWired = false;
 let liveRefreshTimer = null;
 let liveRefreshPromise = null;
 let todayRefreshTimer = null;
+let unsubscribeTodosListener = null;
+let unsubscribeEntriesListener = null;
 const TODO_STORAGE_KEY = "worklog-todos-v1";
 let todos = loadTodos();
 const QUICK_ACTION_KEYS = ["quickAction", "source", "id", "task", "note", "date", "start", "end", "tag", "jiraIssue", "jiraLogged", "noJira", "isOvertime", "location", "reason", "closePreviousId"];
@@ -1366,35 +1368,44 @@ async function saveTodos() {
     console.warn("Could not save to-dos to Firebase:", err);
   }
 }
-async function loadCloudTodos() {
-  if (!currentUser || !db) return;
-  try {
-    const snapshot = await getDoc(doc(db, `users/${currentUser.uid}/settings/todos`));
-    if (snapshot.exists() && Array.isArray(snapshot.data()?.items)) {
-      todos = normalizeTodos(snapshot.data().items);
-      localStorage.setItem(TODO_STORAGE_KEY, JSON.stringify(todos));
-    } else if (todos.length) {
-      await saveTodos();
-    }
-    renderTodos();
-  } catch (err) {
-    console.warn("Could not load to-dos from Firebase:", err);
-  }
-}
 async function refreshLiveData() {
   if (!currentUser || !db || liveRefreshPromise) return liveRefreshPromise;
   liveRefreshPromise = (async () => {
     refreshCurrentDate();
-    await Promise.all([loadCloudTodos(), loadEntries(), fetchJiraSprints()]);
+    await fetchJiraSprints();
     await fetchJiraIssues();
     updateSprintAutoOption();
     render();
-  })().catch(err => console.warn("Could not refresh live worklog data:", err)).finally(() => {
+  })().catch(err => console.warn("Could not refresh live Jira data:", err)).finally(() => {
     liveRefreshPromise = null;
   });
   return liveRefreshPromise;
 }
+function stopFirestoreListeners() {
+  if (unsubscribeTodosListener) unsubscribeTodosListener();
+  if (unsubscribeEntriesListener) unsubscribeEntriesListener();
+  unsubscribeTodosListener = null;
+  unsubscribeEntriesListener = null;
+}
+function startFirestoreListeners() {
+  stopFirestoreListeners();
+  if (!currentUser || !db) return;
+  const todosRef = doc(db, `users/${currentUser.uid}/settings/todos`);
+  unsubscribeTodosListener = onSnapshot(todosRef, snapshot => {
+    if (snapshot.exists() && Array.isArray(snapshot.data()?.items)) {
+      todos = normalizeTodos(snapshot.data().items);
+      localStorage.setItem(TODO_STORAGE_KEY, JSON.stringify(todos));
+    }
+    renderTodos();
+  }, err => console.warn("Could not listen to-dos from Firebase:", err));
+  const entriesRef = collection(db, `users/${currentUser.uid}/entries`);
+  unsubscribeEntriesListener = onSnapshot(entriesRef, snapshot => {
+    allEntries = sortedEntries(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+    render();
+  }, err => console.warn("Could not listen to worklog entries from Firebase:", err));
+}
 function stopLiveRefresh() {
+  stopFirestoreListeners();
   if (liveRefreshTimer) window.clearInterval(liveRefreshTimer);
   if (todayRefreshTimer) window.clearInterval(todayRefreshTimer);
   liveRefreshTimer = null;
@@ -1402,7 +1413,8 @@ function stopLiveRefresh() {
   liveRefreshPromise = null;
 }
 function startLiveRefresh() {
-  stopLiveRefresh();
+  if (liveRefreshTimer) window.clearInterval(liveRefreshTimer);
+  if (todayRefreshTimer) window.clearInterval(todayRefreshTimer);
   liveRefreshTimer = window.setInterval(() => refreshLiveData(), 30000);
   todayRefreshTimer = window.setInterval(() => refreshCurrentDate(), 30000);
 }
@@ -2553,24 +2565,9 @@ async function handleImportFile(file) {
   }
 }
 
-async function loadEntries() {
-  if (!currentUser) return;
-  const col = collection(db, `users/${currentUser.uid}/entries`);
-  try {
-    const snap = await getDocs(query(col, orderBy("date"), orderBy("start")));
-    allEntries = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-  } catch (err) {
-    if (String(err?.code || "").includes("failed-precondition")) {
-      const snap = await getDocs(col);
-      allEntries = sortedEntries(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-      el.authLabel.textContent = "Signed in (fallback query active; create Firestore index for speed)";
-    } else {
-      throw err;
-    }
-  }
+function loadEntries() {
   render();
 }
-
 async function createTimeslotEntry(date, start, end, isOvertime) {
   if (!currentUser) return;
   if (!date || !start || !end) return;
@@ -3443,7 +3440,8 @@ async function boot() {
     el.copyExcelBtn.disabled = !signedIn;
     el.authLabel.textContent = signedIn ? `Signed in as ${user.email}` : (quickActionState.pending ? "Quick action ready — sign in to submit it" : "Not signed in");
     if (!signedIn) {
-      stopLiveRefresh();
+      if (liveRefreshTimer) window.clearInterval(liveRefreshTimer);
+  if (todayRefreshTimer) window.clearInterval(todayRefreshTimer);
       userJiraSettings = emptyJiraSettings();
       jiraUnlockSource = "";
       resetJiraCaches();
@@ -3452,9 +3450,9 @@ async function boot() {
       render();
       return;
     }
-    await loadCloudTodos();
+    startFirestoreListeners();
     await loadJiraSettings();
-    await Promise.all([loadEntries(), fetchJiraSprints()]);
+    await fetchJiraSprints();
     await fetchJiraIssues();
     startLiveRefresh();
     await applyQuickActionIfNeeded();
