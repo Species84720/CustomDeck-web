@@ -725,23 +725,6 @@ function bindViewerEvents() {
   eventBus.on("element.click", event => renderProps(event.element));
   eventBus.on("canvas.click", () => renderProps(null));
   eventBus.on("root.set", event => updateNavigationState(event.element));
-  el.canvas.addEventListener("pointerdown", beginPan);
-  window.addEventListener("pointermove", movePan);
-  window.addEventListener("pointerup", endPan);
-  window.addEventListener("pointercancel", endPan);
-  el.canvas.addEventListener("touchstart", beginTouch, { passive: false });
-  el.canvas.addEventListener("touchmove", moveTouch, { passive: false });
-  el.canvas.addEventListener("touchend", endTouch, { passive: false });
-  el.canvas.addEventListener("touchcancel", endTouch, { passive: false });
-  document.addEventListener("selectstart", event => {
-    if (!panState && !touchState) return;
-    event.preventDefault();
-  });
-  el.canvas.addEventListener("wheel", event => {
-    if (!viewer || !event.ctrlKey) return;
-    event.preventDefault();
-    adjustZoom(event.deltaY < 0 ? 1.1 : 1 / 1.1);
-  }, { passive: false });
 }
 
 async function signIn() {
