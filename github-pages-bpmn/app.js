@@ -30,6 +30,7 @@ let propsOpen = true;
 let panState = null;
 let touchState = null;
 let currentRootElement = null;
+let xmlExecutionListeners = new Map();
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const MAX_FILE_BYTES = 900000;
@@ -240,14 +241,19 @@ function listenerImplementation(listener) {
 function listenerFields(listener) {
   const directFields = asArray(listener?.fields);
   const extFields = asArray(listener?.extensionElements?.values).filter(value => nsKey(value?.$type) === "Field");
-  const childFields = deepFindExtensions(listener, "activiti:Field", "camunda:Field");
+  const childFields = asArray(listener?.$children).filter(value => nsKey(value?.$type) === "Field");
   return [...new Set([...directFields, ...extFields, ...childFields])];
+}
+function childValue(source, ...types) {
+  const wanted = new Set(types.map(type => nsKey(type)));
+  const child = asArray(source?.$children).find(value => wanted.has(nsKey(value?.$type)));
+  return expressionBody(child);
 }
 function fieldDetails(field) {
   return {
     name: readNamedValue(field, "name") || "Unnamed field",
-    stringValue: readNamedValue(field, "stringValue", "string", "value") || expressionBody(field?.string) || expressionBody(field?.value) || "—",
-    expression: readNamedValue(field, "expression") || expressionBody(field?.expression) || "—"
+    stringValue: readNamedValue(field, "stringValue", "string", "value") || expressionBody(field?.string) || expressionBody(field?.value) || childValue(field, "activiti:String", "camunda:String") || "—",
+    expression: readNamedValue(field, "expression") || expressionBody(field?.expression) || childValue(field, "activiti:Expression", "camunda:Expression") || "—"
   };
 }
 function readListeners(bo, kind) {
@@ -263,6 +269,36 @@ function readListeners(bo, kind) {
       fields: listenerFields(listener).map(fieldDetails)
     };
   });
+}
+function executionListenersFromXml(xml) {
+  const byElementId = new Map();
+  if (!xml) return byElementId;
+  try {
+    const documentNode = new DOMParser().parseFromString(xml, "application/xml");
+    for (const listener of documentNode.getElementsByTagNameNS("*", "executionListener")) {
+      let owner = listener.parentElement;
+      while (owner && !owner.getAttribute("id")) owner = owner.parentElement;
+      const ownerId = owner?.getAttribute("id");
+      if (!ownerId) continue;
+      const className = listener.getAttribute("class");
+      const delegateExpression = listener.getAttribute("delegateExpression");
+      const expression = listener.getAttribute("expression");
+      const fields = [...listener.getElementsByTagNameNS("*", "field")].map(field => {
+        const stringNode = [...field.children].find(child => child.localName === "string");
+        const expressionNode = [...field.children].find(child => child.localName === "expression");
+        return {
+          name: field.getAttribute("name") || "Unnamed field",
+          stringValue: stringNode?.textContent?.trim() || field.getAttribute("stringValue") || "—",
+          expression: expressionNode?.textContent?.trim() || field.getAttribute("expression") || "—"
+        };
+      });
+      const implementation = className || delegateExpression || expression || "—";
+      const type = className ? "Java class" : delegateExpression ? "Delegate expression" : expression ? "Expression" : "Implementation";
+      const item = { event: listener.getAttribute("event") || "—", type, value: implementation, stringValue: "", fields };
+      byElementId.set(ownerId, [...(byElementId.get(ownerId) || []), item]);
+    }
+  } catch (_) { /* The normal moddle reader remains available for malformed XML. */ }
+  return byElementId;
 }
 function readFields(bo) {
   return deepFindExtensions(bo, "activiti:Field", "camunda:Field").map(fieldDetails);
@@ -358,32 +394,6 @@ function navigateUp() {
   if (!parentPlane) return;
   viewer.get("canvas").setRootElement(parentPlane);
 }
-function isSubprocessElement(element) {
-  const type = element?.type || element?.businessObject?.$type || "";
-  return type === "bpmn:SubProcess" || type === "bpmn:Transaction";
-}
-function openSubprocess(element) {
-  if (!viewer || !isSubprocessElement(element)) return;
-  const canvas = viewer.get("canvas");
-  const childPlane = element.children ? element : planeForBusinessObject(element.businessObject);
-  if (!childPlane || childPlane === currentRootElement) return;
-  try { canvas.setRootElement(childPlane); }
-  catch (_) {
-    const fallback = planeForBusinessObject(element.businessObject);
-    if (fallback && fallback !== currentRootElement) canvas.setRootElement(fallback);
-  }
-}
-function isDrilldownClick(event) {
-  const target = event?.originalEvent?.target;
-  if (!(target instanceof Element)) return false;
-  return !!target.closest(".djs-drilldown, .bjs-drilldown, [data-action='drilldown']");
-}
-function elementAtEventTarget(event) {
-  const target = event.target instanceof Element ? event.target : null;
-  const gfx = target?.closest(".djs-element");
-  const id = gfx?.getAttribute("data-element-id");
-  return id && viewer ? viewer.get("elementRegistry").get(id) : null;
-}
 function sanitizeForDisplay(value, depth = 0, seen = new WeakSet()) {
   if (value == null) return value;
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
@@ -407,36 +417,6 @@ function rawBlock(title, value) {
   const text = JSON.stringify(sanitized, null, 2);
   if (!text || text === "{}" || text === "[]") return "";
   return section(title, `<div class="prop-group"><div class="prop-row"><div class="prop-value"><pre class="prop-pre">${escapeHtml(text)}</pre></div></div></div>`);
-}
-function patchDiagramXml(xml) {
-  if (!xml || !xml.includes("BPMNShape")) return xml;
-  try {
-    const doc = new DOMParser().parseFromString(xml, "application/xml");
-    const shapes = doc.querySelectorAll("[bpmnElement]");
-    let modified = false;
-    for (const shape of shapes) {
-      if (!shape.nodeName.includes("BPMNShape")) continue;
-      const ref = shape.getAttribute("bpmnElement");
-      if (!ref) continue;
-      let target = null;
-      const allElements = doc.getElementsByTagName("*");
-      for (let index = 0; index < allElements.length; index += 1) {
-        if (allElements[index].getAttribute("id") === ref) {
-          target = allElements[index];
-          break;
-        }
-      }
-      if (!target) continue;
-      const nodeName = target.nodeName || "";
-      if ((nodeName.includes("SubProcess") || nodeName.includes("Transaction")) && shape.getAttribute("isExpanded") !== "true") {
-        shape.setAttribute("isExpanded", "true");
-        modified = true;
-      }
-    }
-    return modified ? new XMLSerializer().serializeToString(doc) : xml;
-  } catch (_) {
-    return xml;
-  }
 }
 function modelPropertyRows(bo) {
   const skip = new Set(["$type", "id", "name", "$parent", "$attrs", "documentation", "extensionElements", "eventDefinitions", "incoming", "outgoing", "sourceRef", "targetRef", "rootElements", "flowElements", "laneSets", "artifacts"]);
@@ -650,7 +630,8 @@ function renderProps(element = activeElement) {
   ].filter(([, value]) => value && value !== "false");
   implementationRows.push(...knownRows.map(([label, value]) => propRow(label, value)));
 
-  const executionListeners = readListeners(businessObject, "execution");
+  const parsedExecutionListeners = xmlExecutionListeners.get(businessObject.id) || [];
+  const executionListeners = parsedExecutionListeners.length ? parsedExecutionListeners : readListeners(businessObject, "execution");
   const taskListeners = readListeners(businessObject, "task");
   const injectedFields = readFields(businessObject);
   const mappings = readMappings(businessObject);
@@ -741,25 +722,13 @@ function setPropsOpen(open) {
 }
 function bindViewerEvents() {
   const eventBus = viewer.get("eventBus");
-  eventBus.on("element.click", event => {
-    renderProps(event.element);
-    if (isDrilldownClick(event)) openSubprocess(event.element);
-  });
-  eventBus.on("element.dblclick", event => openSubprocess(event.element));
+  eventBus.on("element.click", event => renderProps(event.element));
   eventBus.on("canvas.click", () => renderProps(null));
   eventBus.on("root.set", event => updateNavigationState(event.element));
   el.canvas.addEventListener("pointerdown", beginPan);
   window.addEventListener("pointermove", movePan);
   window.addEventListener("pointerup", endPan);
   window.addEventListener("pointercancel", endPan);
-  el.canvas.addEventListener("click", event => {
-    const element = elementAtEventTarget(event);
-    if (isSubprocessElement(element)) openSubprocess(element);
-  }, true);
-  el.canvas.addEventListener("dblclick", event => {
-    const element = elementAtEventTarget(event);
-    if (isSubprocessElement(element)) openSubprocess(element);
-  }, true);
   el.canvas.addEventListener("touchstart", beginTouch, { passive: false });
   el.canvas.addEventListener("touchmove", moveTouch, { passive: false });
   el.canvas.addEventListener("touchend", endTouch, { passive: false });
@@ -883,12 +852,12 @@ async function viewFile(file) {
   el.viewerStatus.textContent = `Viewing ${file.path}`;
   try {
     showDiagram();
-    const xml = patchDiagramXml(file.xml);
+    xmlExecutionListeners = executionListenersFromXml(file.xml);
     if (!viewer) {
       viewer = new BpmnJS({ container: el.diagramHost });
       bindViewerEvents();
     }
-    await viewer.importXML(xml);
+    await viewer.importXML(file.xml);
     fitDiagram();
     renderProps(null);
   } catch (error) { showCanvasMessage(`Could not display this BPMN: ${String(error.message || error)}`, true); }
