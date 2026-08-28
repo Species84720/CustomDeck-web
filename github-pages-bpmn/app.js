@@ -221,6 +221,13 @@ function deepFindExtensions(source, ...types) {
   walk(source?.extensionElements);
   return results;
 }
+function deepFindExtensionsInEvent(source, ...types) {
+  const results = [...deepFindExtensions(source, ...types)];
+  for (const definition of asArray(source?.eventDefinitions)) {
+    results.push(...deepFindExtensions(definition, ...types));
+  }
+  return results;
+}
 function listenerImplementation(listener) {
   const className = readNamedValue(listener, "class");
   const delegateExpression = readNamedValue(listener, "delegateExpression");
@@ -260,12 +267,12 @@ function readFields(bo) {
 }
 function readMappings(bo) {
   return [
-    ...deepFindExtensions(bo, "activiti:In", "camunda:In").map(item => ({
+    ...deepFindExtensionsInEvent(bo, "activiti:In", "camunda:In").map(item => ({
       dir: "In",
       source: readNamedValue(item, "source", "sourceExpression") || "—",
       target: readNamedValue(item, "target", "targetExpression") || "—"
     })),
-    ...deepFindExtensions(bo, "activiti:Out", "camunda:Out").map(item => ({
+    ...deepFindExtensionsInEvent(bo, "activiti:Out", "camunda:Out").map(item => ({
       dir: "Out",
       source: readNamedValue(item, "source", "sourceExpression") || "—",
       target: readNamedValue(item, "target", "targetExpression") || "—"
@@ -273,7 +280,7 @@ function readMappings(bo) {
   ];
 }
 function readInputOutputParameters(bo) {
-  return deepFindExtensions(bo, "camunda:InputOutput", "activiti:InputOutput").flatMap(io => [
+  return deepFindExtensionsInEvent(bo, "camunda:InputOutput", "activiti:InputOutput").flatMap(io => [
     ...asArray(io.inputParameters).map(param => ({
       dir: "Input",
       name: readNamedValue(param, "name") || "Unnamed input",
@@ -348,6 +355,21 @@ function navigateUp() {
   const parentPlane = planeForBusinessObject(parentBo);
   if (!parentPlane) return;
   viewer.get("canvas").setRootElement(parentPlane);
+}
+function isSubprocessElement(element) {
+  const type = element?.type || element?.businessObject?.$type || "";
+  return type === "bpmn:SubProcess" || type === "bpmn:Transaction";
+}
+function openSubprocess(element) {
+  if (!viewer || !isSubprocessElement(element)) return;
+  const childPlane = planeForBusinessObject(element.businessObject);
+  if (!childPlane || childPlane === currentRootElement) return;
+  viewer.get("canvas").setRootElement(childPlane);
+}
+function isDrilldownClick(event) {
+  const target = event?.originalEvent?.target;
+  if (!(target instanceof Element)) return false;
+  return !!target.closest(".djs-drilldown, .bjs-drilldown, [data-action='drilldown']");
 }
 function sanitizeForDisplay(value, depth = 0, seen = new WeakSet()) {
   if (value == null) return value;
@@ -704,7 +726,11 @@ function setPropsOpen(open) {
 }
 function bindViewerEvents() {
   const eventBus = viewer.get("eventBus");
-  eventBus.on("element.click", event => renderProps(event.element));
+  eventBus.on("element.click", event => {
+    renderProps(event.element);
+    if (isDrilldownClick(event)) openSubprocess(event.element);
+  });
+  eventBus.on("element.dblclick", event => openSubprocess(event.element));
   eventBus.on("canvas.click", () => renderProps(null));
   eventBus.on("root.set", event => updateNavigationState(event.element));
   el.canvas.addEventListener("pointerdown", beginPan);
