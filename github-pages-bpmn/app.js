@@ -213,7 +213,7 @@ function deepFindExtensions(source, ...types) {
     seen.add(value);
     if (names.has(nsKey(value.$type))) results.push(value);
     for (const [key, child] of Object.entries(value)) {
-      if (key.startsWith("$") || key === "parent" || key === "labels" || key === "sourceRef" || key === "targetRef" || key === "incoming" || key === "outgoing") continue;
+      if ((key.startsWith("$") && key !== "$children") || key === "parent" || key === "labels" || key === "sourceRef" || key === "targetRef" || key === "incoming" || key === "outgoing") continue;
       if (Array.isArray(child)) child.forEach(walk);
       else if (child && typeof child === "object") walk(child);
     }
@@ -240,12 +240,13 @@ function listenerImplementation(listener) {
 function listenerFields(listener) {
   const directFields = asArray(listener?.fields);
   const extFields = asArray(listener?.extensionElements?.values).filter(value => nsKey(value?.$type) === "Field");
-  return [...directFields, ...extFields];
+  const childFields = deepFindExtensions(listener, "activiti:Field", "camunda:Field");
+  return [...new Set([...directFields, ...extFields, ...childFields])];
 }
 function fieldDetails(field) {
   return {
     name: readNamedValue(field, "name") || "Unnamed field",
-    stringValue: readNamedValue(field, "stringValue", "string") || expressionBody(field?.string) || "—",
+    stringValue: readNamedValue(field, "stringValue", "string", "value") || expressionBody(field?.string) || expressionBody(field?.value) || "—",
     expression: readNamedValue(field, "expression") || expressionBody(field?.expression) || "—"
   };
 }
@@ -258,6 +259,7 @@ function readListeners(bo, kind) {
       event: readNamedValue(listener, "event") || "—",
       type: impl.type,
       value: impl.value,
+      stringValue: readNamedValue(listener, "stringValue", "string", "value") || expressionBody(listener?.string) || expressionBody(listener?.value),
       fields: listenerFields(listener).map(fieldDetails)
     };
   });
@@ -362,14 +364,25 @@ function isSubprocessElement(element) {
 }
 function openSubprocess(element) {
   if (!viewer || !isSubprocessElement(element)) return;
-  const childPlane = planeForBusinessObject(element.businessObject);
+  const canvas = viewer.get("canvas");
+  const childPlane = element.children ? element : planeForBusinessObject(element.businessObject);
   if (!childPlane || childPlane === currentRootElement) return;
-  viewer.get("canvas").setRootElement(childPlane);
+  try { canvas.setRootElement(childPlane); }
+  catch (_) {
+    const fallback = planeForBusinessObject(element.businessObject);
+    if (fallback && fallback !== currentRootElement) canvas.setRootElement(fallback);
+  }
 }
 function isDrilldownClick(event) {
   const target = event?.originalEvent?.target;
   if (!(target instanceof Element)) return false;
   return !!target.closest(".djs-drilldown, .bjs-drilldown, [data-action='drilldown']");
+}
+function elementAtEventTarget(event) {
+  const target = event.target instanceof Element ? event.target : null;
+  const gfx = target?.closest(".djs-element");
+  const id = gfx?.getAttribute("data-element-id");
+  return id && viewer ? viewer.get("elementRegistry").get(id) : null;
 }
 function sanitizeForDisplay(value, depth = 0, seen = new WeakSet()) {
   if (value == null) return value;
@@ -667,12 +680,14 @@ function renderProps(element = activeElement) {
     propRow("Event", listener.event),
     propRow("Type", listener.type),
     propRow("Implementation", listener.value),
+    ...(listener.stringValue ? [propRow("String value", listener.stringValue)] : []),
     propRow("Field injections", listener.fields.length)
   ], listener.event) + (listener.fields.length ? `<div class="prop-sublist">${listener.fields.map(field => `<div class="prop-subitem">${propRow("Name", field.name)}${propRow("String value", field.stringValue)}${propRow("Expression", field.expression)}</div>`).join("")}</div>` : "")).join("")}</div>`));
   if (taskListeners.length) sections.push(section("Task Listeners", `<div class="prop-inline-list">${taskListeners.map((listener, index) => propCard(`Task listener ${index + 1}`, [
     propRow("Event", listener.event),
     propRow("Type", listener.type),
     propRow("Implementation", listener.value),
+    ...(listener.stringValue ? [propRow("String value", listener.stringValue)] : []),
     propRow("Field injections", listener.fields.length)
   ], listener.event) + (listener.fields.length ? `<div class="prop-sublist">${listener.fields.map(field => `<div class="prop-subitem">${propRow("Name", field.name)}${propRow("String value", field.stringValue)}${propRow("Expression", field.expression)}</div>`).join("")}</div>` : "")).join("")}</div>`));
   if (injectedFields.length) sections.push(section("Field Injections", `<div class="prop-inline-list">${injectedFields.map(field => propCard(field.name, [
@@ -737,6 +752,14 @@ function bindViewerEvents() {
   window.addEventListener("pointermove", movePan);
   window.addEventListener("pointerup", endPan);
   window.addEventListener("pointercancel", endPan);
+  el.canvas.addEventListener("click", event => {
+    const element = elementAtEventTarget(event);
+    if (isSubprocessElement(element)) openSubprocess(element);
+  }, true);
+  el.canvas.addEventListener("dblclick", event => {
+    const element = elementAtEventTarget(event);
+    if (isSubprocessElement(element)) openSubprocess(element);
+  }, true);
   el.canvas.addEventListener("touchstart", beginTouch, { passive: false });
   el.canvas.addEventListener("touchmove", moveTouch, { passive: false });
   el.canvas.addEventListener("touchend", endTouch, { passive: false });
