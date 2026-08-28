@@ -725,6 +725,9 @@ function bindViewerEvents() {
   eventBus.on("element.click", event => renderProps(event.element));
   eventBus.on("canvas.click", () => renderProps(null));
   eventBus.on("root.set", event => updateNavigationState(event.element));
+  el.canvas.addEventListener("pointerdown", beginInteraction, true);
+  window.addEventListener("pointerup", endInteraction, true);
+  window.addEventListener("pointercancel", endInteraction, true);
 }
 
 async function signIn() {
