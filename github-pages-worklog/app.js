@@ -9,7 +9,9 @@ const TODO_PRIORITY_RGB = { Highest: [139, 0, 0], High: [220, 38, 38], Medium: [
 const TAGS = ["task", "story", "bug", "meeting", "support", "working-hours", "overtime", "other"];
 const PBI_ISSUE_TYPE_OPTIONS = [
   "Story",
+  "Story - Validation Rule",
   "Bug",
+  "Bug - Validation Rule",
   "Task",
   "Epic",
   "Support",
@@ -1057,8 +1059,8 @@ function normalizePbiIssueType(value) {
 
 function pbiFieldKeysForIssueType(issueType) {
   const normalized = normalizePbiIssueType(issueType).toLowerCase();
-  if (normalized === "bug") return ["summary", "description", "priority", "module_or_screen", "steps_to_reproduce", "expected_behavior"];
-  if (normalized === "story") return ["summary", "description", "priority", "actor", "use_case_goal", "acceptance_criteria"];
+  if (normalized.startsWith("bug")) return ["summary", "description", "priority", "module_or_screen", "steps_to_reproduce", "expected_behavior"];
+  if (normalized.startsWith("story")) return ["summary", "description", "priority", "actor", "use_case_goal", "acceptance_criteria"];
   if (normalized === "task") return ["summary", "description", "priority", "outcome"];
   return ["summary", "description", "priority"];
 }
@@ -2787,8 +2789,8 @@ function pbiJiraFieldSpecs(issue, editMeta = {}) {
   ];
   const storyPointsFieldId = String(userJiraSettings.storyPointsFieldId || "").trim();
   if (storyPointsFieldId) specs.push({ key: "story_points", jiraId: storyPointsFieldId, label: "Story point estimate" });
-  if (type === "bug") specs.push({ key: "module_or_screen", jiraId: "customfield_10086", label: "Module or screen" }, { key: "expected_behavior", jiraId: "customfield_10085", label: "Expected behavior" });
-  if (type === "story") specs.push({ key: "actor", jiraId: "customfield_10081", label: "Actor" }, { key: "use_case_goal", jiraId: "customfield_10080", label: "Use case goal" }, { key: "acceptance_criteria", jiraId: "customfield_10083", label: "Acceptance criteria" });
+  if (type.startsWith("bug")) specs.push({ key: "module_or_screen", jiraId: "customfield_10086", label: "Module or screen" }, { key: "expected_behavior", jiraId: "customfield_10085", label: "Expected behavior" });
+  if (type.startsWith("story")) specs.push({ key: "actor", jiraId: "customfield_10081", label: "Actor" }, { key: "use_case_goal", jiraId: "customfield_10080", label: "Use case goal" }, { key: "acceptance_criteria", jiraId: "customfield_10083", label: "Acceptance criteria" });
   if (type === "task") specs.push({ key: "outcome", jiraId: "customfield_10121", label: "Outcome" });
   return specs;
 }
