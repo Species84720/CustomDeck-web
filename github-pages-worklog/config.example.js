@@ -8,6 +8,7 @@ window.WORKLOG_CONFIG = {
     appId: "REPLACE_ME"
   },
   jiraWorkerUrl: "https://your-worker.your-subdomain.workers.dev",
+  sprintSummaryUrl: "https://your-power-automate-trigger-url",
   pbiDraftUrl: "",
   uatApiUrl: ""
 };

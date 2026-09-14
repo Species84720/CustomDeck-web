@@ -60,6 +60,7 @@ const el = {
   nextDayBtn: document.getElementById("btn-next-day"),
   newBtn: document.getElementById("btn-new"),
   copyExcelBtn: document.getElementById("btn-copy-excel"),
+  summarizeSprintBtn: document.getElementById("btn-summarize-sprint"),
   sprintSelect: document.getElementById("sprint-select"),
   dayNavControls: document.getElementById("day-nav-controls"),
   sprintControls: document.getElementById("sprint-controls"),
@@ -163,6 +164,11 @@ const el = {
   uatStepsBody: document.getElementById("uat-steps-body"),
   uatCopyBtn: document.getElementById("btn-uat-copy"),
   uatResetBtn: document.getElementById("btn-uat-reset"),
+  sprintSummaryDialog: document.getElementById("sprint-summary-dialog"),
+  sprintSummaryTitle: document.getElementById("sprint-summary-title"),
+  sprintSummaryStatus: document.getElementById("sprint-summary-status"),
+  sprintSummaryContent: document.getElementById("sprint-summary-content"),
+  copySprintSummaryBtn: document.getElementById("btn-copy-sprint-summary"),
   deleteBtn: document.getElementById("btn-delete"),
   cancelBtn: document.getElementById("btn-cancel")
 };
@@ -194,6 +200,7 @@ let currentPbiIssueType = "";
 let currentPbiDraftFields = null;
 let currentUatIssueKey = "";
 let currentUatData = null;
+let currentSprintSummaryText = "";
 let currentView = "day";
 let dragState = null;
 let suppressContextMenuUntil = 0;
@@ -2269,6 +2276,106 @@ function selectedSprintEntries() {
   return filterEntries(allEntries.filter(e => e.date >= sprint.start && e.date <= sprint.end));
 }
 
+function sprintSummaryRequestBody(sprint, entries) {
+  const linkedEntries = entries.filter(entry => !entry.noJira && String(entry.jiraIssue || "").trim());
+  const issues = [...new Set(linkedEntries.map(entry => String(entry.jiraIssue).trim().toUpperCase()))]
+    .map(key => {
+      const cached = jiraIssueCache.find(issue => String(issue?.key || "").toUpperCase() === key);
+      return {
+        key,
+        summary: String(cached?.summary || jiraIssueSummaryByKey[key] || ""),
+        status: jiraIssueStatus(cached || {}),
+        storyPoints: jiraIssueStoryPoints(cached || {}) || null,
+        worklog: linkedEntries
+          .filter(entry => String(entry.jiraIssue).trim().toUpperCase() === key)
+          .map(entry => ({
+            date: entry.date,
+            start: entry.start,
+            end: entry.end || "",
+            task: entry.task,
+            note: entry.note || "",
+            jiraLogged: !!entry.jiraLogged,
+            overtime: !!(entry.isOvertime || entry.tag === "overtime"),
+            tag: entry.tag || ""
+          }))
+      };
+    });
+  const totalMinutes = linkedEntries.reduce((sum, entry) => sum + (entry.end ? Math.max(0, mins(entry.end) - mins(entry.start)) : 0), 0);
+  return {
+    body: JSON.stringify({
+      sprint,
+      totals: {
+        linkedIssues: issues.length,
+        blocks: linkedEntries.length,
+        minutes: totalMinutes,
+        duration: durLabel(totalMinutes),
+        effortPoints: effortPointsLabel(totalMinutes) || null
+      },
+      issues
+    })
+  };
+}
+
+function sprintSummaryResponseText(rawText) {
+  if (!rawText) return "The summary completed without response content.";
+  try {
+    let value = JSON.parse(rawText);
+    if (value && typeof value === "object") {
+      const candidate = value.summaryDetails ?? value.summary_details ?? value.summary ?? value.details ?? value.body;
+      if (typeof candidate === "string") {
+        try { value = JSON.parse(candidate); } catch (_) { return candidate; }
+      } else if (candidate != null) {
+        value = candidate;
+      }
+    }
+    return typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  } catch (_) {
+    return rawText;
+  }
+}
+
+async function summarizeSelectedSprint() {
+  const { sprint } = resolveSprintSelection();
+  if (!sprint) return alert("Select a sprint before requesting a summary.");
+  const targetUrl = String(cfg.sprintSummaryUrl || "").trim();
+  if (!targetUrl) return alert("The Sprint Summary API URL is not configured in config.js.");
+  const entries = selectedSprintEntries();
+  const linkedEntryCount = entries.filter(entry => !entry.noJira && String(entry.jiraIssue || "").trim()).length;
+  if (!linkedEntryCount) return alert("This sprint has no linked Jira issues to summarize.");
+  el.sprintSummaryTitle.textContent = `${sprint.name} summary`;
+  el.sprintSummaryStatus.textContent = "Generating summary...";
+  el.sprintSummaryContent.textContent = "Sending sprint details to Power Automate.";
+  el.copySprintSummaryBtn.hidden = true;
+  currentSprintSummaryText = "";
+  el.sprintSummaryDialog.showModal();
+  el.summarizeSprintBtn.disabled = true;
+  try {
+    const response = await fetch(targetUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(sprintSummaryRequestBody(sprint, entries))
+    });
+    const rawText = await response.text();
+    if (!response.ok) {
+      let message = rawText;
+      try {
+        const data = JSON.parse(rawText);
+        message = data?.error?.message || data?.error || data?.message || rawText;
+      } catch (_) {}
+      throw new Error(String(message || `HTTP ${response.status}`));
+    }
+    currentSprintSummaryText = sprintSummaryResponseText(rawText);
+    el.sprintSummaryContent.textContent = currentSprintSummaryText;
+    el.sprintSummaryStatus.textContent = `Summary generated from ${linkedEntryCount} linked worklog block${linkedEntryCount === 1 ? "" : "s"}.`;
+    el.copySprintSummaryBtn.hidden = false;
+  } catch (error) {
+    el.sprintSummaryStatus.textContent = "Could not generate the sprint summary.";
+    el.sprintSummaryContent.textContent = String(error?.message || error);
+  } finally {
+    el.summarizeSprintBtn.disabled = !currentUser;
+  }
+}
+
 function normalizeSprint(s) {
   return {
     name: String(s?.name || "").trim(),
@@ -3223,6 +3330,12 @@ function wireEvents() {
   el.logout.addEventListener("click", () => signOut(auth));
   el.newBtn.addEventListener("click", () => openEditor(null));
   el.copyExcelBtn.addEventListener("click", copyExcelRows);
+  el.summarizeSprintBtn.addEventListener("click", summarizeSelectedSprint);
+  el.copySprintSummaryBtn.addEventListener("click", async () => {
+    if (!currentSprintSummaryText) return;
+    await navigator.clipboard.writeText(currentSprintSummaryText);
+    el.sprintSummaryStatus.textContent = "Summary copied to the clipboard.";
+  });
   el.filterTag.addEventListener("change", render);
   el.filterJira.addEventListener("change", render);
   el.dayPicker.addEventListener("change", () => {
@@ -3440,6 +3553,7 @@ async function boot() {
     el.importBtn.disabled = !signedIn;
     el.jiraSettingsBtn.disabled = !signedIn;
     el.copyExcelBtn.disabled = !signedIn;
+    el.summarizeSprintBtn.disabled = !signedIn;
     el.authLabel.textContent = signedIn ? `Signed in as ${user.email}` : (quickActionState.pending ? "Quick action ready — sign in to submit it" : "Not signed in");
     if (!signedIn) {
       if (liveRefreshTimer) window.clearInterval(liveRefreshTimer);

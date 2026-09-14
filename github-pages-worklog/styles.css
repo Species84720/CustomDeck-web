@@ -265,6 +265,21 @@ dialog {
 }
 dialog form { display: grid; gap: 10px; }
 dialog h2 { margin: 2px 0 0; font-size: 17px; }
+.sprint-summary-dialog { width:min(760px,95vw); }
+.sprint-summary-content {
+  margin:0;
+  min-height:180px;
+  max-height:min(60vh,620px);
+  overflow:auto;
+  white-space:pre-wrap;
+  overflow-wrap:anywhere;
+  border:1px solid var(--border);
+  border-radius:10px;
+  background:#090f1b;
+  padding:14px;
+  color:var(--text);
+  font:13px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;
+}
 @media (max-width: 760px) {
   .stats { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
   .grid2 { grid-template-columns: 1fr; }
@@ -410,6 +425,7 @@ html[data-theme="light"] .month-day { color:#55657d; }
 html[data-theme="light"] .month-count { color:#182235; }
 html[data-theme="light"] .day-popup { background:linear-gradient(180deg,#ffffff 0%,#f5f8fc 100%);box-shadow:0 16px 45px #64748b26; }
 html[data-theme="light"] dialog { background:linear-gradient(180deg,#ffffff 0%,#f6f9fd 100%);box-shadow:0 20px 60px #64748b30; }
+html[data-theme="light"] .sprint-summary-content { background:#f8fafc; }
 html[data-theme="light"] .pbi-history,
 html[data-theme="light"] .uat-pre { background:#f8fafc; }
 html[data-theme="light"] .json-display { background:#f7fafc;color:#1f6f43;border-color:#d3dce8; }

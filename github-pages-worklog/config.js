@@ -10,6 +10,7 @@ window.WORKLOG_CONFIG = window.WORKLOG_CONFIG || {
     measurementId: "G-3T01YPHH66"
   },
   jiraWorkerUrl: "https://jira-proxy.juan-mizzi.workers.dev",
+  sprintSummaryUrl: "https://1e24479cee97eedd82feff45823fa9.59.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/28/workflows/da0fcc244adb484298bd792069fed5c3/triggers/manual/paths/invoke?api-version=1",
   pbiDraftUrl: "",
   uatApiUrl: ""
 };

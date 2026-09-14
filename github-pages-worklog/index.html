@@ -60,6 +60,7 @@
               <option value="">Auto / none</option>
             </select>
           </label>
+          <button id="btn-summarize-sprint" class="btn primary" type="button" disabled>Summarize Sprint</button>
         </div>
         <label>
           Tag
@@ -415,12 +416,23 @@
     </form>
   </dialog>
 
+  <dialog id="sprint-summary-dialog" class="sprint-summary-dialog">
+    <form method="dialog">
+      <h2 id="sprint-summary-title">Sprint summary</h2>
+      <p id="sprint-summary-status" class="muted dialog-copy" role="status"></p>
+      <pre id="sprint-summary-content" class="sprint-summary-content"></pre>
+      <menu>
+        <button id="btn-copy-sprint-summary" type="button" class="btn" hidden>Copy Summary</button>
+        <button type="submit" class="btn primary">Close</button>
+      </menu>
+    </form>
+  </dialog>
+
   <script src="./config.js"></script>
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
   <script type="module" src="./app.js"></script>
 </body>
 </html>
-
 
 
