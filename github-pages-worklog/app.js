@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-auth.js";
-import { getFirestore, collection, doc, getDoc, setDoc, deleteDoc, writeBatch, serverTimestamp, onSnapshot } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-firestore.js";
+import { getFirestore, collection, doc, getDoc, getDocs, setDoc, deleteDoc, query, where, writeBatch, serverTimestamp, onSnapshot } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-firestore.js";
 
 const cfg = window.WORKLOG_CONFIG || {};
 const TODO_PRIORITIES = ["Highest", "High", "Medium", "Low", "Lowest"];
@@ -44,9 +44,15 @@ async function jiraScrumTeamCommentBody() {
   return { type: "doc", version: 1, content: [{ type: "paragraph", content }] };
 }
 const el = {
-  importBtn: document.getElementById("btn-import"),
+  exportBtn: document.getElementById("btn-export"),
   themeBtn: document.getElementById("btn-theme"),
-  importFile: document.getElementById("import-file"),
+  exportDialog: document.getElementById("export-dialog"),
+  exportForm: document.getElementById("export-form"),
+  exportFrom: document.getElementById("export-from"),
+  exportTo: document.getElementById("export-to"),
+  exportStatus: document.getElementById("export-status"),
+  exportCancelBtn: document.getElementById("btn-export-cancel"),
+  exportDownloadBtn: document.getElementById("btn-export-download"),
   pbiCreatorBtn: document.getElementById("btn-pbi-creator"),
   jiraSettingsBtn: document.getElementById("btn-jira-settings"),
   login: document.getElementById("btn-login"),
@@ -1573,6 +1579,68 @@ function offsetDate(ds, d) {
   return x.toISOString().slice(0, 10);
 }
 
+function monthBounds(ds) {
+  const value = String(ds || localDateKey()).slice(0, 10);
+  const [yearText, monthText] = value.split("-");
+  const year = Number(yearText);
+  const month = Number(monthText);
+  if (!year || !month) return { start: value, end: value };
+  const start = `${yearText}-${String(month).padStart(2, "0")}-01`;
+  const end = localDateKey(new Date(year, month, 0, 12));
+  return { start, end };
+}
+
+function suggestedExportPeriod() {
+  const anchorDate = String(el.dayPicker?.value || today).slice(0, 10) || today;
+  if (currentView === "week") {
+    const start = weekStart(anchorDate);
+    return { from: start, to: offsetDate(start, 6), label: `Current week (${start} to ${offsetDate(start, 6)})` };
+  }
+  if (currentView === "month") {
+    const { start, end } = monthBounds(anchorDate);
+    return { from: start, to: end, label: `Current month (${start} to ${end})` };
+  }
+  if (currentView === "sprint") {
+    const { sprint } = resolveSprintSelection();
+    if (sprint?.start && sprint?.end) return { from: sprint.start, to: sprint.end, label: `${sprint.name} (${sprint.start} to ${sprint.end})` };
+  }
+  return { from: anchorDate, to: anchorDate, label: `Current day (${anchorDate})` };
+}
+
+function sanitizeExportValue(value) {
+  if (value == null) return value;
+  if (Array.isArray(value)) return value.map(sanitizeExportValue);
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "object") {
+    if (typeof value.toDate === "function") {
+      const date = value.toDate();
+      if (date instanceof Date && !Number.isNaN(date.getTime())) return date.toISOString();
+    }
+    const out = {};
+    Object.entries(value).forEach(([key, item]) => {
+      out[key] = sanitizeExportValue(item);
+    });
+    return out;
+  }
+  return value;
+}
+
+function exportFileName(from, to) {
+  return `worklog-export-${String(from || "").slice(0, 10)}${from === to ? "" : `-to-${String(to || "").slice(0, 10)}`}.json`;
+}
+
+function downloadJsonFile(filename, payload) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
 function parseBoolParam(value) {
   const raw = String(value || "").trim().toLowerCase();
   return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
@@ -2565,112 +2633,51 @@ function render() {
   }
 }
 
-function parseEndReason(task) {
-  const m = /^\[END:\s*(.*)\]$/.exec(String(task || "").trim());
-  return m ? m[1].trim() : "";
-}
-
-function looksLikeCloudEntry(entry) {
-  return !!entry && typeof entry === "object" && !!entry.date && !!entry.start && !!entry.task;
-}
-
-function makeStableImportId(entry) {
-  if (entry.id) return String(entry.id);
-  const raw = `${entry.date}|${entry.start}|${entry.task}|${entry.note || ""}`;
-  let hash = 0;
-  for (let i = 0; i < raw.length; i += 1) hash = ((hash << 5) - hash + raw.charCodeAt(i)) | 0;
-  const stamp = `${entry.date || "0000-00-00"}`.replaceAll("-", "") + (entry.start || "00:00").replaceAll(":", "");
-  return `${stamp}_${Math.abs(hash)}`;
-}
-
-function normalizeCloudEntry(entry) {
-  const tag = String(entry.tag || "other").trim() || "other";
-  const slot = !!entry.isBackgroundSlot || isTimeslotTag(tag) || !!entry.noJira || !!entry.no_jira;
-  return {
-    id: makeStableImportId(entry),
-    task: String(entry.task || "").trim(),
-    note: String(entry.note || "").trim(),
-    date: String(entry.date || "").slice(0, 10),
-    location: normalizeLocation(entry.location),
-    start: String(entry.start || "").slice(0, 5),
-    end: String(entry.end || "").slice(0, 5),
-    tag,
-    jiraIssue: slot ? "" : String(entry.jiraIssue || entry.jira_issue || "").trim().toUpperCase(),
-    jiraLogged: slot ? false : (!!entry.jiraLogged || !!entry.jira_logged),
-    noJira: slot ? true : (!!entry.noJira || !!entry.no_jira),
-    isBackgroundSlot: slot,
-    isOvertime: !!entry.isOvertime,
-    reason: String(entry.reason || "").trim()
-  };
-}
-
-function parseLegacyEntries(rawEntries) {
-  const sorted = [...rawEntries].filter(e => e && typeof e === "object").sort((a, b) => String(a.timestamp || "").localeCompare(String(b.timestamp || "")));
-  const out = [];
-  for (let i = 0; i < sorted.length; i += 1) {
-    const cur = sorted[i];
-    if ((cur.type || "start") === "end") continue;
-    let nextSameDay = null;
-    for (let j = i + 1; j < sorted.length; j += 1) {
-      if (sorted[j].date === cur.date) { nextSameDay = sorted[j]; break; }
-      if (sorted[j].date && cur.date && sorted[j].date !== cur.date) break;
-    }
-    const tag = String(cur.tag || "other").trim() || "other";
-    const slot = isTimeslotTag(tag) || !!cur.no_jira;
-    out.push({
-      id: makeStableImportId({ id: cur.id, date: cur.date, start: cur.time, task: cur.task, note: cur.note }),
-      task: String(cur.task || "").trim(),
-      note: String(cur.note || "").trim(),
-      date: String(cur.date || "").slice(0, 10),
-      location: "work",
-      start: String(cur.time || "").slice(0, 5),
-      end: nextSameDay ? String(nextSameDay.time || "").slice(0, 5) : "",
-      tag,
-      jiraIssue: slot ? "" : String(cur.jira_issue || "").trim().toUpperCase(),
-      jiraLogged: slot ? false : !!cur.jira_logged,
-      noJira: slot,
-      isBackgroundSlot: slot,
-      isOvertime: cur.tag === "overtime",
-      reason: nextSameDay && nextSameDay.type === "end" ? parseEndReason(nextSameDay.task) : ""
-    });
+function openExportDialog() {
+  if (!currentUser || !db) {
+    alert("Sign in first to export your Firebase work log.");
+    return;
   }
-  return out;
+  const { from, to, label } = suggestedExportPeriod();
+  el.exportFrom.value = from;
+  el.exportTo.value = to;
+  el.exportStatus.textContent = `Default period: ${label}. Adjust the dates if needed.`;
+  el.exportDialog.showModal();
 }
 
-function normalizeImportPayload(payload) {
-  const rows = Array.isArray(payload) ? payload : (Array.isArray(payload?.entries) ? payload.entries : (Array.isArray(payload?.logs) ? payload.logs : null));
-  if (!rows) throw new Error("Expected a JSON array, or an object containing entries/logs array.");
-  if (rows.every(looksLikeCloudEntry)) return rows.map(normalizeCloudEntry).filter(e => e.task && e.date && e.start);
-  const seemsLegacy = rows.some(e => e && (e.type === "start" || e.type === "end" || e.timestamp || e.time));
-  if (seemsLegacy) return parseLegacyEntries(rows).filter(e => e.task && e.date && e.start);
-  throw new Error("Unrecognized JSON schema for log import.");
-}
-
-async function importEntries(entries) {
-  if (!currentUser || !entries.length) return;
-  if (!window.confirm(`Import ${entries.length} entries into your cloud log?`)) return;
-  const colPath = `users/${currentUser.uid}/entries`;
-  for (let i = 0; i < entries.length; i += 400) {
-    const batch = writeBatch(db);
-    entries.slice(i, i + 400).forEach(entry => {
-      const id = makeStableImportId(entry);
-      batch.set(doc(db, `${colPath}/${id}`), { ...entry, id, updatedAt: serverTimestamp(), importedAt: serverTimestamp() }, { merge: true });
-    });
-    await batch.commit();
-  }
-  await loadEntries();
-  alert(`Imported ${entries.length} entries.`);
-}
-
-async function handleImportFile(file) {
-  if (!file) return;
+async function exportEntriesForPeriod(event) {
+  event.preventDefault();
+  if (!currentUser || !db) return alert("Sign in first to export your Firebase work log.");
+  const from = String(el.exportFrom.value || "").slice(0, 10);
+  const to = String(el.exportTo.value || "").slice(0, 10);
+  if (!from || !to) return alert("Choose both start and end dates.");
+  if (to < from) return alert("The end date must be on or after the start date.");
+  el.exportDownloadBtn.disabled = true;
+  el.exportStatus.textContent = `Exporting Firebase entries from ${from} to ${to}...`;
   try {
-    const payload = JSON.parse(await file.text());
-    await importEntries(normalizeImportPayload(payload));
+    const entriesRef = collection(db, `users/${currentUser.uid}/entries`);
+    const snapshot = await getDocs(query(entriesRef, where("date", ">=", from), where("date", "<=", to)));
+    const entries = sortedEntries(snapshot.docs
+      .map(docSnapshot => sanitizeExportValue({ id: docSnapshot.id, ...docSnapshot.data() }))
+      .filter(entry => String(entry?.date || "").slice(0, 10) >= from && String(entry?.date || "").slice(0, 10) <= to));
+    const payload = {
+      source: "firebase",
+      exportedAt: new Date().toISOString(),
+      period: { from, to },
+      user: {
+        uid: currentUser.uid,
+        email: String(currentUser.email || "")
+      },
+      entryCount: entries.length,
+      entries
+    };
+    downloadJsonFile(exportFileName(from, to), payload);
+    el.exportStatus.textContent = `Downloaded ${entries.length} entr${entries.length === 1 ? "y" : "ies"}.`;
+    el.exportDialog.close();
   } catch (err) {
-    alert(`Import failed: ${String(err.message || err)}`);
+    el.exportStatus.textContent = `Export failed: ${String(err?.message || err)}`;
   } finally {
-    el.importFile.value = "";
+    el.exportDownloadBtn.disabled = false;
   }
 }
 
@@ -3320,8 +3327,9 @@ function wireEvents() {
     updateThemeButton();
   });
   el.pbiCreatorBtn.addEventListener("click", openPbiCreatorDialog);
-  el.importBtn.addEventListener("click", () => el.importFile.click());
-  el.importFile.addEventListener("change", async () => handleImportFile(el.importFile.files && el.importFile.files[0]));
+  el.exportBtn.addEventListener("click", openExportDialog);
+  el.exportForm.addEventListener("submit", exportEntriesForPeriod);
+  el.exportCancelBtn.addEventListener("click", () => el.exportDialog.close());
   el.jiraSettingsBtn.addEventListener("click", openJiraSettingsDialog);
   el.login.addEventListener("click", async () => {
     if (!auth) return alert("Firebase is not initialized. Check web/github-pages-worklog/config.js.");
@@ -3528,7 +3536,7 @@ function initFirebase() {
   if (!ok) {
     el.authLabel.textContent = "Set firebase config in config.js";
     el.login.disabled = true;
-    el.importBtn.disabled = true;
+    el.exportBtn.disabled = true;
     el.jiraSettingsBtn.disabled = true;
     el.newBtn.disabled = true;
     return false;
@@ -3550,7 +3558,7 @@ async function boot() {
     el.login.hidden = signedIn;
     el.logout.hidden = !signedIn;
     el.newBtn.disabled = !signedIn;
-    el.importBtn.disabled = !signedIn;
+    el.exportBtn.disabled = !signedIn;
     el.jiraSettingsBtn.disabled = !signedIn;
     el.copyExcelBtn.disabled = !signedIn;
     el.summarizeSprintBtn.disabled = !signedIn;

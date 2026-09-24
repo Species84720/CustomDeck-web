@@ -22,8 +22,7 @@
       <div class="brand"><div class="brand-mark" aria-hidden="true">W</div><div><h1>Work Log</h1><p>Plan your day. Track what matters.</p></div></div>
       <div class="topbar-actions">
         <button id="btn-theme" class="btn" type="button" aria-label="Switch to light theme">☀ Light</button>
-        <button id="btn-import" class="btn" disabled>Import JSON</button>
-        <input id="import-file" type="file" accept="application/json,.json" hidden>
+        <button id="btn-export" class="btn" disabled>Export JSON</button>
         <button id="btn-pbi-creator" class="btn" type="button">PBI Creator</button>
         <button id="btn-jira-settings" class="btn" disabled>Jira Settings</button>
         <button id="btn-login" class="btn primary">Sign in with Google</button>
@@ -176,6 +175,26 @@
         <button id="btn-delete" type="button" class="btn danger" hidden>Delete</button>
         <button type="button" id="btn-cancel" class="btn">Cancel</button>
         <button type="submit" class="btn primary">Save</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <dialog id="export-dialog">
+    <form id="export-form" method="dialog">
+      <h2>Export work log</h2>
+      <p class="muted dialog-copy">Download your Firebase work log entries for a selected period as JSON.</p>
+      <div class="grid2">
+        <label>From
+          <input id="export-from" type="date" required>
+        </label>
+        <label>To
+          <input id="export-to" type="date" required>
+        </label>
+      </div>
+      <p id="export-status" class="muted"></p>
+      <menu>
+        <button id="btn-export-cancel" type="button" class="btn">Cancel</button>
+        <button id="btn-export-download" type="submit" class="btn primary">Download JSON</button>
       </menu>
     </form>
   </dialog>
@@ -434,5 +453,4 @@
   <script type="module" src="./app.js"></script>
 </body>
 </html>
-
 
