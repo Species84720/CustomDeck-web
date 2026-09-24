@@ -2638,6 +2638,10 @@ function openExportDialog() {
     alert("Sign in first to export your Firebase work log.");
     return;
   }
+  if (!el.exportDialog || !el.exportFrom || !el.exportTo || !el.exportStatus) {
+    alert("Export UI is not available on this page build yet.");
+    return;
+  }
   const { from, to, label } = suggestedExportPeriod();
   el.exportFrom.value = from;
   el.exportTo.value = to;
@@ -3314,6 +3318,7 @@ function friendlyAuthError(err) {
 
 function wireEvents() {
   wireDragSelectionGuard();
+  const hasExportUi = !!(el.exportBtn && el.exportDialog && el.exportForm && el.exportFrom && el.exportTo && el.exportStatus && el.exportCancelBtn && el.exportDownloadBtn);
   const updateThemeButton = () => {
     const light = document.documentElement.dataset.theme === "light";
     el.themeBtn.textContent = light ? "☾ Dark" : "☀ Light";
@@ -3327,9 +3332,11 @@ function wireEvents() {
     updateThemeButton();
   });
   el.pbiCreatorBtn.addEventListener("click", openPbiCreatorDialog);
-  el.exportBtn.addEventListener("click", openExportDialog);
-  el.exportForm.addEventListener("submit", exportEntriesForPeriod);
-  el.exportCancelBtn.addEventListener("click", () => el.exportDialog.close());
+  if (hasExportUi) {
+    el.exportBtn.addEventListener("click", openExportDialog);
+    el.exportForm.addEventListener("submit", exportEntriesForPeriod);
+    el.exportCancelBtn.addEventListener("click", () => el.exportDialog.close());
+  }
   el.jiraSettingsBtn.addEventListener("click", openJiraSettingsDialog);
   el.login.addEventListener("click", async () => {
     if (!auth) return alert("Firebase is not initialized. Check web/github-pages-worklog/config.js.");
@@ -3536,7 +3543,7 @@ function initFirebase() {
   if (!ok) {
     el.authLabel.textContent = "Set firebase config in config.js";
     el.login.disabled = true;
-    el.exportBtn.disabled = true;
+    if (el.exportBtn) el.exportBtn.disabled = true;
     el.jiraSettingsBtn.disabled = true;
     el.newBtn.disabled = true;
     return false;
@@ -3558,7 +3565,7 @@ async function boot() {
     el.login.hidden = signedIn;
     el.logout.hidden = !signedIn;
     el.newBtn.disabled = !signedIn;
-    el.exportBtn.disabled = !signedIn;
+    if (el.exportBtn) el.exportBtn.disabled = !signedIn;
     el.jiraSettingsBtn.disabled = !signedIn;
     el.copyExcelBtn.disabled = !signedIn;
     el.summarizeSprintBtn.disabled = !signedIn;
