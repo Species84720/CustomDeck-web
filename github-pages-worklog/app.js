@@ -1874,11 +1874,21 @@ function initJiraIssueSelect() {
         return haystack.includes(term) ? data : null;
       }
     });
+    const focusSelect2Search = () => {
+      const search = document.querySelector(".select2-container--open .select2-search__field");
+      if (search && document.activeElement !== search) search.focus();
+    };
     select.on("select2:open.worklogJiraFocus", () => {
-      window.setTimeout(() => {
-        const search = document.querySelector(".select2-container--open .select2-search__field");
-        if (search) search.focus();
-      }, 0);
+      if (el.jira) el.jira.blur();
+      window.setTimeout(focusSelect2Search, 0);
+      window.setTimeout(focusSelect2Search, 80);
+      window.setTimeout(focusSelect2Search, 180);
+    });
+    el.dialog.addEventListener("focusin", event => {
+      if (!document.querySelector(".select2-container--open")) return;
+      if (event.target === el.jira || event.target === el.jiraSelect) {
+        window.setTimeout(focusSelect2Search, 0);
+      }
     });
   }
 }
@@ -3495,6 +3505,12 @@ function wireEvents() {
     render();
   });
   el.form.addEventListener("submit", saveEntry);
+  el.dialog.addEventListener("keydown", event => {
+    if (event.key !== "Enter" || !(event.ctrlKey || event.metaKey)) return;
+    event.preventDefault();
+    if (typeof el.form.requestSubmit === "function") el.form.requestSubmit();
+    else el.form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  });
   el.jiraSettingsForm.addEventListener("submit", saveJiraSettings);
   el.uatFetchBtn.addEventListener("click", fetchUatIssue);
   el.uatOpenSettingsBtn.addEventListener("click", openJiraSettingsDialog);
@@ -3528,6 +3544,11 @@ function wireEvents() {
     el.pbiInput.value = item.dataset.pbiHistoryText || "";
   });
   el.jiraIssueSave.addEventListener("click", saveJiraIssueChanges);
+  el.jiraIssueDialog.addEventListener("keydown", event => {
+    if (event.key !== "Enter" || !(event.ctrlKey || event.metaKey) || el.jiraIssueSave.hidden) return;
+    event.preventDefault();
+    saveJiraIssueChanges();
+  });
   el.jiraIssueBody.addEventListener("click", event => {
     const button = event.target.closest("[data-jira-edit-field]");
     if (!button) return;
