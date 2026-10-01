@@ -1851,7 +1851,7 @@ function updateStats(entries) {
 }
 
 function jiraIssueMatchesDropdownSearch(issue, query) {
-  const text = [issue.key, issue.summary, jiraIssueStatus(issue)].join(" ").toLowerCase();
+  const text = [issue.key, issue.summary, issue.issuetype, jiraIssueStatus(issue)].join(" ").toLowerCase();
   return !query || text.includes(query.toLowerCase());
 }
 
@@ -1870,7 +1870,7 @@ function initJiraIssueSelect() {
         const term = String(params.term || "").trim().toLowerCase();
         if (!term) return data;
         const issue = jiraIssueCache.find(item => item.key === data.id);
-        const haystack = [data.text, issue?.key, issue?.summary, jiraIssueStatus(issue)].join(" ").toLowerCase();
+        const haystack = [data.text, issue?.key, issue?.summary, issue?.issuetype, jiraIssueStatus(issue)].join(" ").toLowerCase();
         return haystack.includes(term) ? data : null;
       }
     });
