@@ -27,6 +27,7 @@ const PBI_ISSUE_TYPE_OPTIONS = [
 const DAY_GRID_HEIGHT = 900;
 const DAY_START_MINUTES = 5 * 60;
 const DAY_END_DEFAULT_MINUTES = 16 * 60;
+const WORKLOG_GROUP_PREFIX = "GROUP:";
 const JIRA_REMEMBERED_PASSPHRASE_STORAGE_KEY = "worklog-jira-passphrase-v1";
 const PBI_HISTORY_STORAGE_KEY = "worklog-pbi-history-v1";
 const THEME_STORAGE_KEY = "worklog-theme";
@@ -98,6 +99,8 @@ const el = {
   tag: document.getElementById("f-tag"),
   jira: document.getElementById("f-jira"),
   jiraSelect: document.getElementById("f-jira-select"),
+  jiraGroup: document.getElementById("f-jira-group"),
+  jiraGroupBtn: document.getElementById("btn-jira-group"),
   reason: document.getElementById("f-reason"),
   overtime: document.getElementById("f-overtime"),
   noJira: document.getElementById("f-no-jira"),
@@ -1482,7 +1485,7 @@ function renderTodos() {
   progress.style.width = todos.length ? `${Math.round((completed / todos.length) * 100)}%` : "0%";
   list.innerHTML = visibleOpen.map(todo => `
     <li class="todo-item" style="${todoPriorityStyle(todo)}">
-      <label class="todo-check-label"><input type="checkbox" data-todo-action="toggle" data-todo-id="${todo.id}"><span class="todo-checkbox" aria-hidden="true">✓</span><span class="todo-text-wrap"><span class="todo-text">${escapeHtml(todo.text)}${todo.jiraIssue ? ` <span class="badge todo-jira" data-jira-issue="${escapeHtml(todo.jiraIssue)}">${escapeHtml(todo.jiraIssue)}</span>` : ""}</span>${todo.createdAt ? `<span class="todo-meta">Added ${escapeHtml(localDateTimeLabel(todo.createdAt))}</span>` : ""}</span></label>
+      <label class="todo-check-label"><input type="checkbox" data-todo-action="toggle" data-todo-id="${todo.id}"><span class="todo-checkbox" aria-hidden="true">✓</span><span class="todo-text-wrap"><span class="todo-text">${escapeHtml(todo.text)}${todo.jiraIssue ? ` <span class="badge todo-jira" data-jira-issue="${escapeHtml(todo.jiraIssue)}">${escapeHtml(linkedIssueDisplayLabel(todo.jiraIssue))}</span>` : ""}</span>${todo.createdAt ? `<span class="todo-meta">Added ${escapeHtml(localDateTimeLabel(todo.createdAt))}</span>` : ""}</span></label>
       <button class="todo-edit" type="button" data-todo-action="edit" data-todo-id="${todo.id}" aria-label="Edit todo">✎</button><button class="todo-delete" type="button" data-todo-action="delete" data-todo-id="${todo.id}" aria-label="Delete todo">×</button>
     </li>`).join("");
   if (finishedList && finishedSection && finishedTitle) {
@@ -1492,7 +1495,7 @@ function renderTodos() {
       const locked = todoIsLocked(todo);
       const canUndo = !locked;
       return `<li class="todo-item done${locked ? " locked" : ""}" style="${todoPriorityStyle(todo)}">
-        <label class="todo-check-label">${canUndo ? `<input type="checkbox" data-todo-action="toggle" data-todo-id="${todo.id}" checked>` : ""}<span class="todo-checkbox" aria-hidden="true">✓</span><span class="todo-text-wrap"><span class="todo-text">${escapeHtml(todo.text)}${todo.jiraIssue ? ` <span class="badge todo-jira" data-jira-issue="${escapeHtml(todo.jiraIssue)}">${escapeHtml(todo.jiraIssue)}</span>` : ""}</span>${todo.createdAt ? `<span class="todo-meta">Added ${escapeHtml(localDateTimeLabel(todo.createdAt))}</span>` : ""}<span class="todo-meta">Finished ${escapeHtml(localDateTimeLabel(todo.completedAt || todo.completedDate))}${locked ? " · locked" : " · can undo today"}</span></span></label>
+        <label class="todo-check-label">${canUndo ? `<input type="checkbox" data-todo-action="toggle" data-todo-id="${todo.id}" checked>` : ""}<span class="todo-checkbox" aria-hidden="true">✓</span><span class="todo-text-wrap"><span class="todo-text">${escapeHtml(todo.text)}${todo.jiraIssue ? ` <span class="badge todo-jira" data-jira-issue="${escapeHtml(todo.jiraIssue)}">${escapeHtml(linkedIssueDisplayLabel(todo.jiraIssue))}</span>` : ""}</span>${todo.createdAt ? `<span class="todo-meta">Added ${escapeHtml(localDateTimeLabel(todo.createdAt))}</span>` : ""}<span class="todo-meta">Finished ${escapeHtml(localDateTimeLabel(todo.completedAt || todo.completedDate))}${locked ? " · locked" : " · can undo today"}</span></span></label>
       </li>`;
     }).join("");
   }
@@ -1728,8 +1731,54 @@ function sortSprintsDesc(items) {
   return [...items].sort((a, b) => String(b?.start || "").localeCompare(String(a?.start || "")));
 }
 
+function isJiraIssueKey(value) {
+  return /^[A-Z][A-Z0-9]+-\d+$/i.test(String(value || "").trim());
+}
+
+function isWorklogGroupKey(value) {
+  return String(value || "").trim().toUpperCase().startsWith(WORKLOG_GROUP_PREFIX);
+}
+
+function worklogGroupLabel(value) {
+  const raw = String(value || "").trim();
+  return isWorklogGroupKey(raw) ? raw.slice(raw.indexOf(":") + 1).trim() : raw;
+}
+
+function formatWorklogGroup(value) {
+  const label = worklogGroupLabel(value).replace(/\s+/g, " ").trim();
+  return label ? `${WORKLOG_GROUP_PREFIX} ${label}` : "";
+}
+
+function normalizeLinkedIssueValue(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (isJiraIssueKey(raw)) return raw.toUpperCase();
+  return formatWorklogGroup(raw);
+}
+
+function linkedIssueKey(value) {
+  return normalizeLinkedIssueValue(value);
+}
+
+function linkedIssueDisplayLabel(value) {
+  const normalized = normalizeLinkedIssueValue(value);
+  return isWorklogGroupKey(normalized) ? worklogGroupLabel(normalized) : normalized;
+}
+
+function isRealJiraIssueValue(value) {
+  return isJiraIssueKey(normalizeLinkedIssueValue(value));
+}
+
+function linkedIssueSummaryLabel(issueKey, rows = []) {
+  if (isWorklogGroupKey(issueKey)) return "Provisional group for a future Jira issue";
+  const summary = String(jiraIssueSummaryByKey[issueKey] || "").trim();
+  const fallbackSummary = fallbackIssueSummary(issueKey, rows);
+  return summary || fallbackSummary || (jiraIssueLookupPending.has(issueKey) ? "Loading Jira summary..." : "Summary unavailable");
+}
+
 function issueTypeColor(entry) {
-  const key = String(entry?.jiraIssue || "").trim().toUpperCase();
+  const key = linkedIssueKey(entry?.jiraIssue || "");
+  if (isWorklogGroupKey(key)) return "#a855f7";
   const t = String(jiraIssueTypeByKey[key] || "").toLowerCase();
   if (!t) return "#4f8cff";
   if (t.includes("bug")) return "#ef4444";
@@ -1750,8 +1799,9 @@ function issueTypeColor(entry) {
 }
 
 function sprintIssueColor(issueKey) {
-  const key = String(issueKey || "").trim().toUpperCase();
+  const key = linkedIssueKey(issueKey);
   if (!key || key === "UNLINKED") return "#6b7280";
+  if (isWorklogGroupKey(key)) return "#a855f7";
   return issueTypeColor({ jiraIssue: key });
 }
 
@@ -1895,7 +1945,13 @@ function initJiraIssueSelect() {
 
 function setJiraIssueSelectValue(issueKey) {
   if (!el.jiraSelect) return;
-  const key = String(issueKey || "").trim().toUpperCase();
+  const key = normalizeLinkedIssueValue(issueKey);
+  if (isWorklogGroupKey(key)) {
+    el.jiraSelect.value = "";
+    initJiraIssueSelect();
+    if (window.jQuery && window.jQuery.fn?.select2) window.jQuery(el.jiraSelect).trigger("change");
+    return;
+  }
   if (key && !Array.from(el.jiraSelect.options).some(option => option.value === key)) {
     const issue = jiraIssueCache.find(item => String(item?.key || "").trim().toUpperCase() === key);
     const option = document.createElement("option");
@@ -1987,8 +2043,8 @@ function fallbackIssueSummary(issueKey, rows = []) {
 }
 
 async function ensureJiraIssueCached(issueKey) {
-  const key = String(issueKey || "").trim().toUpperCase();
-  if (!key || key === "UNLINKED" || jiraIssueLookupPending.has(key)) return;
+  const key = linkedIssueKey(issueKey);
+  if (!key || key === "UNLINKED" || isWorklogGroupKey(key) || jiraIssueLookupPending.has(key)) return;
   if (Object.prototype.hasOwnProperty.call(jiraIssueSummaryByKey, key) || !currentUser) return;
   jiraIssueLookupPending.add(key);
   try {
@@ -2074,8 +2130,9 @@ function openEditor(entry, defaults = null) {
   el.start.value = editing ? entry.start : (preset.start || "09:00");
   el.end.value = editing ? (entry.end || "") : (preset.end || "");
   el.tag.value = editing ? (entry.tag || "other") : (preset.tag || "task");
-  const selectedJiraIssue = editing ? (entry.jiraIssue || "") : (preset.jiraIssue || "");
-  el.jira.value = selectedJiraIssue;
+  const selectedJiraIssue = normalizeLinkedIssueValue(editing ? (entry.jiraIssue || "") : (preset.jiraIssue || ""));
+  el.jira.value = isWorklogGroupKey(selectedJiraIssue) ? linkedIssueDisplayLabel(selectedJiraIssue) : selectedJiraIssue;
+  if (el.jiraGroup) el.jiraGroup.value = isWorklogGroupKey(selectedJiraIssue) ? linkedIssueDisplayLabel(selectedJiraIssue) : "";
   setJiraIssueSelectValue(selectedJiraIssue);
   el.reason.value = editing ? (entry.reason || "Done") : "Done";
   el.overtime.checked = editing ? !!entry.isOvertime : !!preset.isOvertime;
@@ -2121,7 +2178,7 @@ function renderList(targetEl, entries, emptyLabel = "No blocks") {
   targetEl.innerHTML = entries.map(e => {
     const color = issueTypeColor(e);
     const duration = e.end ? durLabel(Math.max(0, mins(e.end) - mins(e.start))) : "Open";
-    const jira = e.jiraIssue ? `<span class='badge'>${e.jiraIssue}</span>` : "<span class='badge warn'>No Jira</span>";
+    const jira = e.jiraIssue ? `<span class='badge'>${escapeHtml(linkedIssueDisplayLabel(e.jiraIssue))}</span>` : "<span class='badge warn'>No Jira</span>";
     const logged = e.jiraLogged ? "<span class='badge ok'>Logged</span>" : "";
     const ot = e.isOvertime ? "<span class='badge warn'>Overtime</span>" : "";
     return `<article class="block" data-id="${e.id}" style="border-left-color:${color};">
@@ -2206,7 +2263,7 @@ function buildDayGrid(entries) {
     block.style.top = `${top}px`;
     block.style.height = `${height}px`;
     block.dataset.id = e.id;
-    block.innerHTML = `<div class='task'>${escapeHtml(e.task)}</div><div class='meta'>${e.start}${e.end ? ` - ${e.end}` : ""}${e.jiraIssue ? ` | ${escapeHtml(e.jiraIssue)}` : ""}</div>`;
+    block.innerHTML = `<div class='task'>${escapeHtml(e.task)}</div><div class='meta'>${e.start}${e.end ? ` - ${e.end}` : ""}${e.jiraIssue ? ` | ${escapeHtml(linkedIssueDisplayLabel(e.jiraIssue))}` : ""}</div>`;
     block.addEventListener("click", () => {
       const entry = allEntries.find(x => x.id === e.id);
       if (entry) openEditor(entry);
@@ -2326,7 +2383,7 @@ function hideDayPopup() {
 function showDayPopup(ds) {
   const entries = filterEntries(sortedForDay(ds));
   const total = entries.reduce((s, e) => s + (e.end ? Math.max(0, mins(e.end) - mins(e.start)) : 0), 0);
-  const rows = entries.slice(0, 8).map(e => `<div class='meta'>${e.start}${e.end ? `-${e.end}` : ""} · ${escapeHtml(e.task)}${e.jiraIssue ? ` · ${escapeHtml(e.jiraIssue)}` : ""}</div>`).join("");
+  const rows = entries.slice(0, 8).map(e => `<div class='meta'>${e.start}${e.end ? `-${e.end}` : ""} · ${escapeHtml(e.task)}${e.jiraIssue ? ` · ${escapeHtml(linkedIssueDisplayLabel(e.jiraIssue))}` : ""}</div>`).join("");
   el.dayPopup.innerHTML = `<h4>${ds}</h4><div class='meta'>${entries.length} block(s) · ${durLabel(total)}</div><div style='display:grid;gap:4px;margin-top:8px'>${rows || "<div class='meta'>No entries</div>"}</div><div class='meta' style='margin-top:8px'>Double click a month cell to open Day view.</div>`;
   el.dayPopup.hidden = false;
 }
@@ -2389,7 +2446,7 @@ function selectedSprintEntries() {
 
 function sprintSummaryRequestBody(sprint, entries) {
   const linkedEntries = entries.filter(entry => !entry.noJira && String(entry.jiraIssue || "").trim());
-  const issues = [...new Set(linkedEntries.map(entry => String(entry.jiraIssue).trim().toUpperCase()))]
+  const issues = [...new Set(linkedEntries.map(entry => linkedIssueKey(entry.jiraIssue)).filter(Boolean))]
     .map(key => {
       const cached = jiraIssueCache.find(issue => String(issue?.key || "").toUpperCase() === key);
       return {
@@ -2398,7 +2455,7 @@ function sprintSummaryRequestBody(sprint, entries) {
         status: jiraIssueStatus(cached || {}),
         storyPoints: jiraIssueStoryPoints(cached || {}) || null,
         worklog: linkedEntries
-          .filter(entry => String(entry.jiraIssue).trim().toUpperCase() === key)
+          .filter(entry => linkedIssueKey(entry.jiraIssue) === key)
           .map(entry => ({
             date: entry.date,
             start: entry.start,
@@ -2547,28 +2604,29 @@ function renderSprintView() {
   const scoped = entries.filter(e => !e.noJira);
   const byIssue = new Map();
   scoped.forEach(e => {
-    const key = (e.jiraIssue || "UNLINKED").trim().toUpperCase();
+    const key = linkedIssueKey(e.jiraIssue) || "UNLINKED";
     if (!byIssue.has(key)) byIssue.set(key, []);
     byIssue.get(key).push(e);
   });
   const issueHtml = [...byIssue.entries()]
     .sort((a, b) => b[1].length - a[1].length)
     .map(([issue, rows]) => {
-      if (issue !== "UNLINKED" && !Object.prototype.hasOwnProperty.call(jiraIssueSummaryByKey, issue)) ensureJiraIssueCached(issue);
+      if (issue !== "UNLINKED" && !isWorklogGroupKey(issue) && !Object.prototype.hasOwnProperty.call(jiraIssueSummaryByKey, issue)) ensureJiraIssueCached(issue);
       const total = rows.reduce((s, e) => s + (e.end ? Math.max(0, mins(e.end) - mins(e.start)) : 0), 0);
       const ot = rows.reduce((s, e) => s + ((e.isOvertime || e.tag === "overtime") && e.end ? Math.max(0, mins(e.end) - mins(e.start)) : 0), 0);
       const totalPoints = effortPointsLabel(total);
       const allLogged = rows.length > 0 && rows.every(r => !!r.jiraLogged);
-      const summary = issue === "UNLINKED" ? "" : String(jiraIssueSummaryByKey[issue] || "").trim();
-      const fallbackSummary = issue === "UNLINKED" ? "" : fallbackIssueSummary(issue, rows);
       const summaryLabel = issue === "UNLINKED"
         ? ""
-        : (summary || fallbackSummary || (jiraIssueLookupPending.has(issue) ? "Loading Jira summary..." : "Summary unavailable"));
+        : linkedIssueSummaryLabel(issue, rows);
       const issueEffortLabel = totalPoints ? `${totalPoints} pt` : "";
-      const statusBadge = issue === "UNLINKED" ? "" : jiraIssueStatusBadge(issue);
+      const statusBadge = issue === "UNLINKED" || isWorklogGroupKey(issue) ? "" : jiraIssueStatusBadge(issue);
+      const issueBadge = isWorklogGroupKey(issue)
+        ? `<span class='badge group'>Group</span>`
+        : `<span class='badge'>${escapeHtml(linkedIssueDisplayLabel(issue))}</span>`;
       const issueTitle = issue === "UNLINKED"
         ? `<div class='sprint-issue-heading'><span class='badge warn'>Unlinked</span><span class='sprint-issue-summary'>No Jira issue linked</span>${issueEffortLabel ? `<span class='badge sprint-issue-effort'>${escapeHtml(issueEffortLabel)}</span>` : ""}</div>`
-        : `<div class='sprint-issue-heading' data-jira-issue='${escapeHtml(issue)}'><span class='badge'>${escapeHtml(issue)}</span><span class='sprint-issue-summary'>${escapeHtml(summaryLabel)}</span>${statusBadge}${issueEffortLabel ? `<span class='badge sprint-issue-effort'>${escapeHtml(issueEffortLabel)}</span>` : ""}</div>`;
+        : `<div class='sprint-issue-heading' data-jira-issue='${escapeHtml(issue)}'>${issueBadge}<span class='sprint-issue-summary'>${escapeHtml(isWorklogGroupKey(issue) ? linkedIssueDisplayLabel(issue) : summaryLabel)}</span>${isWorklogGroupKey(issue) ? `<span class='badge sprint-issue-effort'>Future Jira</span>` : statusBadge}${issueEffortLabel ? `<span class='badge sprint-issue-effort'>${escapeHtml(issueEffortLabel)}</span>` : ""}</div>`;
       const openAttr = openIssues.has(issue) ? " open" : "";
       const cardClasses = `block sprint-issue-card${allLogged ? " is-fully-logged" : ""}`;
       const borderColor = sprintIssueColor(issue);
@@ -2625,9 +2683,9 @@ function renderSprintView() {
 
 async function toggleIssueLogged(issueKey, checked) {
   if (!currentUser) return;
-  const key = String(issueKey || "").trim().toUpperCase();
+  const key = linkedIssueKey(issueKey);
   if (!key) return;
-  const rows = selectedSprintEntries().filter(e => (e.jiraIssue || "UNLINKED").trim().toUpperCase() === key);
+  const rows = selectedSprintEntries().filter(e => linkedIssueKey(e.jiraIssue) === key);
   if (!rows.length) return;
   for (let i = 0; i < rows.length; i += 400) {
     const batch = writeBatch(db);
@@ -2772,6 +2830,7 @@ async function saveEntry(evt) {
   const rawId = el.id.value.trim();
   const endValue = String(el.end.value || "").trim();
   const reasonValue = String(el.reason.value || "").trim();
+  const linkedIssue = normalizeLinkedIssueValue(el.jiraSelect?.value || el.jira.value || el.jiraGroup?.value || "");
   const entry = {
     task: el.task.value.trim(),
     note: el.note.value.trim(),
@@ -2780,7 +2839,7 @@ async function saveEntry(evt) {
     start: el.start.value,
     end: endValue,
     tag: el.tag.value || "other",
-    jiraIssue: String(el.jiraSelect?.value || el.jira.value || "").trim().toUpperCase(),
+    jiraIssue: linkedIssue,
     jiraLogged: !!el.jiraLogged.checked,
     noJira: !!el.noJira.checked,
     isOvertime: !!el.overtime.checked,
@@ -2788,8 +2847,8 @@ async function saveEntry(evt) {
     updatedAt: serverTimestamp()
   };
   if (isTimeslotTag(entry.tag)) {
-    entry.noJira = true;
     entry.isBackgroundSlot = true;
+    entry.noJira = !entry.jiraIssue;
   }
   if (entry.noJira) {
     entry.jiraIssue = "";
@@ -2807,8 +2866,10 @@ async function saveEntry(evt) {
   const id = rawId || `${entry.date.replaceAll("-", "")}${entry.start.replaceAll(":", "")}_${crypto.randomUUID().slice(0, 8)}`;
   await setDoc(doc(db, `users/${currentUser.uid}/entries/${id}`), entry, { merge: true });
   if (entry.jiraIssue && !entry.noJira) {
-    await moveNewBlockJiraIssueToInProgress(entry.jiraIssue);
-    ensureJiraIssueCached(entry.jiraIssue);
+    if (isRealJiraIssueValue(entry.jiraIssue)) {
+      await moveNewBlockJiraIssueToInProgress(entry.jiraIssue);
+      ensureJiraIssueCached(entry.jiraIssue);
+    }
   }
   el.dialog.close();
   await loadEntries();
@@ -3222,7 +3283,7 @@ async function addTodoForJira(issueKey) {
   }
   todos.unshift({
     id: crypto.randomUUID(),
-    text: summary ? issueKey + ": " + summary : issueKey,
+    text: summary ? linkedIssueDisplayLabel(issueKey) + ": " + summary : linkedIssueDisplayLabel(issueKey),
     jiraIssue: issueKey,
     done: false,
     createdAt: new Date().toISOString(),
@@ -3233,6 +3294,38 @@ async function addTodoForJira(issueKey) {
   renderTodos();
 }
 
+async function relinkIssueGroupToJira(issueKey) {
+  const oldKey = linkedIssueKey(issueKey);
+  if (!oldKey) return;
+  const target = window.prompt("Replace " + linkedIssueDisplayLabel(oldKey) + " with Jira issue key:");
+  if (target === null) return;
+  const newKey = normalizeLinkedIssueValue(target);
+  if (!isRealJiraIssueValue(newKey)) {
+    toast("Enter a real Jira key such as CPM-123.", "warn");
+    return;
+  }
+  const rows = selectedSprintEntries().filter(entry => linkedIssueKey(entry.jiraIssue) === oldKey);
+  if (!rows.length) {
+    toast("No rows found for " + linkedIssueDisplayLabel(oldKey) + " in the selected sprint.", "warn");
+    return;
+  }
+  for (let i = 0; i < rows.length; i += 400) {
+    const batch = writeBatch(db);
+    rows.slice(i, i + 400).forEach(row => {
+      batch.set(doc(db, `users/${currentUser.uid}/entries/${row.id}`), {
+        jiraIssue: newKey,
+        noJira: false,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+    });
+    await batch.commit();
+  }
+  await moveNewBlockJiraIssueToInProgress(newKey);
+  await fetchJiraIssues();
+  await loadEntries();
+  toast(`${rows.length} row(s) moved to ${newKey}.`, "success");
+}
+
 function hideJiraContextMenu() {
   document.querySelector(".jira-context-menu")?.remove();
 }
@@ -3241,12 +3334,16 @@ function showJiraContextMenu(issueKey, x, y) {
   hideJiraContextMenu();
   const menu = document.createElement("div");
   menu.className = "jira-context-menu";
-  menu.innerHTML = "<button data-jira-menu='view'>View issue</button><button data-jira-menu='uat'>UAT test case</button><button data-jira-menu='story-points'>Set story points from worklog</button><button data-jira-menu='rows-description'>Add rows to Description</button><button data-jira-menu='rows-comment'>Add rows to comments</button><button data-jira-menu='comment'>Add comment</button><button data-jira-menu='move'>Change status</button><button data-jira-menu='todo'>Add to to-do list</button>";
+  const isGroup = isWorklogGroupKey(issueKey);
+  menu.innerHTML = isGroup
+    ? "<button data-jira-menu='relink'>Change group to Jira issue</button><button data-jira-menu='todo'>Add to to-do list</button>"
+    : "<button data-jira-menu='view'>View issue</button><button data-jira-menu='uat'>UAT test case</button><button data-jira-menu='story-points'>Set story points from worklog</button><button data-jira-menu='rows-description'>Add rows to Description</button><button data-jira-menu='rows-comment'>Add rows to comments</button><button data-jira-menu='comment'>Add comment</button><button data-jira-menu='move'>Change status</button><button data-jira-menu='todo'>Add to to-do list</button>";
   menu.style.left = Math.min(x, window.innerWidth - 190) + "px";
   menu.style.top = Math.min(y, window.innerHeight - 290) + "px";
   menu.addEventListener("click", async event => {
     const action = event.target.closest("[data-jira-menu]")?.dataset.jiraMenu;
     hideJiraContextMenu();
+    if (action === "relink") await relinkIssueGroupToJira(issueKey);
     if (action === "view") await viewJiraIssue(issueKey);
     if (action === "uat") openUatDialog(issueKey);
     if (action === "story-points") await setStoryPointEstimateFromWorklog(issueKey);
@@ -3322,8 +3419,8 @@ async function fetchJiraSprints() {
 
 
 function issueRowsForJiraIssue(issueKey) {
-  const key = String(issueKey || "").trim().toUpperCase();
-  const rows = selectedSprintEntries().filter(e => (e.jiraIssue || "UNLINKED").trim().toUpperCase() === key);
+  const key = linkedIssueKey(issueKey);
+  const rows = selectedSprintEntries().filter(e => linkedIssueKey(e.jiraIssue) === key);
   return {
     rows,
     headers: ["Effort", "Description", "Date"],
@@ -3565,11 +3662,25 @@ function wireEvents() {
   el.cancelBtn.addEventListener("click", () => el.dialog.close());
   const syncJiraSelectToInput = () => {
     el.jira.value = el.jiraSelect.value || "";
+    if (el.jiraSelect.value && el.jiraGroup) el.jiraGroup.value = "";
   };
   el.jiraSelect.addEventListener("change", syncJiraSelectToInput);
   if (window.jQuery && window.jQuery.fn?.select2) {
     window.jQuery(el.jiraSelect).on("change.worklogJiraSelect", syncJiraSelectToInput);
   }
+  el.jiraGroupBtn?.addEventListener("click", () => {
+    const label = String(el.jiraGroup?.value || el.task.value || "").trim();
+    const group = formatWorklogGroup(label);
+    if (!group) {
+      toast("Enter a group name first.", "warn");
+      el.jiraGroup?.focus();
+      return;
+    }
+    setJiraIssueSelectValue("");
+    el.jira.value = linkedIssueDisplayLabel(group);
+    el.noJira.checked = false;
+    toast("Linked to group: " + linkedIssueDisplayLabel(group), "success");
+  });
   el.sprintIssuesList.addEventListener("click", event => {
     const issue = event.target.closest("[data-jira-issue]")?.dataset.jiraIssue;
     if (issue) openEditor(null, { jiraIssue: issue });
