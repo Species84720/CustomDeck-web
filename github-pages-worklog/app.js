@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-auth.js";
-import { getFirestore, collection, doc, getDoc, getDocs, setDoc, deleteDoc, writeBatch, serverTimestamp, query, orderBy } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-firestore.js";
+import { getFirestore, collection, doc, getDoc, getDocs, setDoc, deleteDoc, query, where, writeBatch, serverTimestamp, onSnapshot } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-firestore.js";
 
 const cfg = window.WORKLOG_CONFIG || {};
 const TODO_PRIORITIES = ["Highest", "High", "Medium", "Low", "Lowest"];
@@ -9,7 +9,9 @@ const TODO_PRIORITY_RGB = { Highest: [139, 0, 0], High: [220, 38, 38], Medium: [
 const TAGS = ["task", "story", "bug", "meeting", "support", "working-hours", "overtime", "other"];
 const PBI_ISSUE_TYPE_OPTIONS = [
   "Story",
+  "Story - Validation Rule",
   "Bug",
+  "Bug - Validation Rule",
   "Task",
   "Epic",
   "Support",
@@ -42,9 +44,15 @@ async function jiraScrumTeamCommentBody() {
   return { type: "doc", version: 1, content: [{ type: "paragraph", content }] };
 }
 const el = {
-  importBtn: document.getElementById("btn-import"),
+  exportBtn: document.getElementById("btn-export"),
   themeBtn: document.getElementById("btn-theme"),
-  importFile: document.getElementById("import-file"),
+  exportDialog: document.getElementById("export-dialog"),
+  exportForm: document.getElementById("export-form"),
+  exportFrom: document.getElementById("export-from"),
+  exportTo: document.getElementById("export-to"),
+  exportStatus: document.getElementById("export-status"),
+  exportCancelBtn: document.getElementById("btn-export-cancel"),
+  exportDownloadBtn: document.getElementById("btn-export-download"),
   pbiCreatorBtn: document.getElementById("btn-pbi-creator"),
   jiraSettingsBtn: document.getElementById("btn-jira-settings"),
   login: document.getElementById("btn-login"),
@@ -58,6 +66,7 @@ const el = {
   nextDayBtn: document.getElementById("btn-next-day"),
   newBtn: document.getElementById("btn-new"),
   copyExcelBtn: document.getElementById("btn-copy-excel"),
+  summarizeSprintBtn: document.getElementById("btn-summarize-sprint"),
   sprintSelect: document.getElementById("sprint-select"),
   dayNavControls: document.getElementById("day-nav-controls"),
   sprintControls: document.getElementById("sprint-controls"),
@@ -161,11 +170,16 @@ const el = {
   uatStepsBody: document.getElementById("uat-steps-body"),
   uatCopyBtn: document.getElementById("btn-uat-copy"),
   uatResetBtn: document.getElementById("btn-uat-reset"),
+  sprintSummaryDialog: document.getElementById("sprint-summary-dialog"),
+  sprintSummaryTitle: document.getElementById("sprint-summary-title"),
+  sprintSummaryStatus: document.getElementById("sprint-summary-status"),
+  sprintSummaryContent: document.getElementById("sprint-summary-content"),
+  copySprintSummaryBtn: document.getElementById("btn-copy-sprint-summary"),
   deleteBtn: document.getElementById("btn-delete"),
   cancelBtn: document.getElementById("btn-cancel")
 };
 
-const today = new Date().toISOString().slice(0, 10);
+let today = localDateKey();
 el.dayPicker.value = today;
 el.filterTag.innerHTML += TAGS.map(t => `<option value="${t}">${t}</option>`).join("");
 el.tag.innerHTML = TAGS.map(t => `<option value="${t}">${t}</option>`).join("");
@@ -192,10 +206,16 @@ let currentPbiIssueType = "";
 let currentPbiDraftFields = null;
 let currentUatIssueKey = "";
 let currentUatData = null;
+let currentSprintSummaryText = "";
 let currentView = "day";
 let dragState = null;
 let suppressContextMenuUntil = 0;
 let dragSelectionGuardWired = false;
+let liveRefreshTimer = null;
+let liveRefreshPromise = null;
+let todayRefreshTimer = null;
+let unsubscribeTodosListener = null;
+let unsubscribeEntriesListener = null;
 const TODO_STORAGE_KEY = "worklog-todos-v1";
 let todos = loadTodos();
 const QUICK_ACTION_KEYS = ["quickAction", "source", "id", "task", "note", "date", "start", "end", "tag", "jiraIssue", "jiraLogged", "noJira", "isOvertime", "location", "reason", "closePreviousId"];
@@ -717,6 +737,7 @@ async function jiraWorkerFetch(path, extra = {}) {
     project: userJiraSettings.project,
     email: userJiraSettings.email,
     apiToken: userJiraSettings.apiToken,
+    storyPointsFieldId: userJiraSettings.storyPointsFieldId,
     ...extra
   };
   const response = await fetch(`${worker}${path}`, {
@@ -727,6 +748,27 @@ async function jiraWorkerFetch(path, extra = {}) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(String(data?.error || `HTTP ${response.status}`));
   return data;
+}
+
+function toast(message, type = "info") {
+  const text = String(message || "").trim();
+  if (!text) return;
+  let container = document.querySelector(".toast-stack");
+  if (!container) {
+    container = document.createElement("div");
+    container.className = "toast-stack";
+    document.body.appendChild(container);
+  }
+  const item = document.createElement("div");
+  item.className = `toast toast-${type}`;
+  item.setAttribute("role", type === "error" ? "alert" : "status");
+  item.textContent = text;
+  container.appendChild(item);
+  window.setTimeout(() => item.classList.add("is-visible"), 20);
+  window.setTimeout(() => {
+    item.classList.remove("is-visible");
+    window.setTimeout(() => item.remove(), 180);
+  }, type === "error" ? 5200 : 3200);
 }
 
 function getPbiDraftUrl(settings = userJiraSettings) {
@@ -1052,8 +1094,8 @@ function normalizePbiIssueType(value) {
 
 function pbiFieldKeysForIssueType(issueType) {
   const normalized = normalizePbiIssueType(issueType).toLowerCase();
-  if (normalized === "bug") return ["summary", "description", "priority", "module_or_screen", "steps_to_reproduce", "expected_behavior"];
-  if (normalized === "story") return ["summary", "description", "priority", "actor", "use_case_goal", "acceptance_criteria"];
+  if (normalized.startsWith("bug")) return ["summary", "description", "priority", "module_or_screen", "steps_to_reproduce", "expected_behavior"];
+  if (normalized.startsWith("story")) return ["summary", "description", "priority", "actor", "use_case_goal", "acceptance_criteria"];
   if (normalized === "task") return ["summary", "description", "priority", "outcome"];
   return ["summary", "description", "priority"];
 }
@@ -1290,6 +1332,16 @@ function localDateTimeLabel(value) {
   if (Number.isNaN(date.getTime())) return String(value);
   return `${localDateKey(date)} ${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
 }
+function refreshCurrentDate() {
+  const nextToday = localDateKey();
+  if (nextToday === today) return false;
+  const wasShowingToday = el.dayPicker.value === today;
+  today = nextToday;
+  if (wasShowingToday) el.dayPicker.value = today;
+  updateSprintAutoOption();
+  render();
+  return true;
+}
 function beginDragSelectionGuard() {
   document.body.classList.add("is-dragging");
 }
@@ -1353,26 +1405,64 @@ async function saveTodos() {
     console.warn("Could not save to-dos to Firebase:", err);
   }
 }
-async function loadCloudTodos() {
+async function refreshLiveData() {
+  if (!currentUser || !db || liveRefreshPromise) return liveRefreshPromise;
+  liveRefreshPromise = (async () => {
+    refreshCurrentDate();
+    await fetchJiraSprints();
+    await fetchJiraIssues();
+    updateSprintAutoOption();
+    render();
+  })().catch(err => console.warn("Could not refresh live Jira data:", err)).finally(() => {
+    liveRefreshPromise = null;
+  });
+  return liveRefreshPromise;
+}
+function stopFirestoreListeners() {
+  if (unsubscribeTodosListener) unsubscribeTodosListener();
+  if (unsubscribeEntriesListener) unsubscribeEntriesListener();
+  unsubscribeTodosListener = null;
+  unsubscribeEntriesListener = null;
+}
+function startFirestoreListeners() {
+  stopFirestoreListeners();
   if (!currentUser || !db) return;
-  try {
-    const snapshot = await getDoc(doc(db, `users/${currentUser.uid}/settings/todos`));
+  const todosRef = doc(db, `users/${currentUser.uid}/settings/todos`);
+  unsubscribeTodosListener = onSnapshot(todosRef, snapshot => {
     if (snapshot.exists() && Array.isArray(snapshot.data()?.items)) {
       todos = normalizeTodos(snapshot.data().items);
       localStorage.setItem(TODO_STORAGE_KEY, JSON.stringify(todos));
-    } else if (todos.length) {
-      await saveTodos();
     }
     renderTodos();
-  } catch (err) {
-    console.warn("Could not load to-dos from Firebase:", err);
-  }
+  }, err => console.warn("Could not listen to-dos from Firebase:", err));
+  const entriesRef = collection(db, `users/${currentUser.uid}/entries`);
+  unsubscribeEntriesListener = onSnapshot(entriesRef, snapshot => {
+    allEntries = sortedEntries(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+    render();
+  }, err => console.warn("Could not listen to worklog entries from Firebase:", err));
+}
+function stopLiveRefresh() {
+  stopFirestoreListeners();
+  if (liveRefreshTimer) window.clearInterval(liveRefreshTimer);
+  if (todayRefreshTimer) window.clearInterval(todayRefreshTimer);
+  liveRefreshTimer = null;
+  todayRefreshTimer = null;
+  liveRefreshPromise = null;
+}
+function startLiveRefresh() {
+  if (liveRefreshTimer) window.clearInterval(liveRefreshTimer);
+  if (todayRefreshTimer) window.clearInterval(todayRefreshTimer);
+  liveRefreshTimer = window.setInterval(() => refreshLiveData(), 30000);
+  todayRefreshTimer = window.setInterval(() => refreshCurrentDate(), 30000);
 }
 function renderTodos() {
   const list = document.getElementById("todo-list");
   const empty = document.getElementById("todo-empty");
   const count = document.getElementById("todo-count");
   const clear = document.getElementById("todo-clear");
+  const addButton = document.getElementById("todo-add-button");
+  const addDialog = document.getElementById("todo-add-dialog");
+  const addCancel = document.getElementById("todo-add-cancel");
   const search = document.getElementById("todo-search");
   const progress = document.getElementById("todo-progress-bar");
   const finishedSection = document.getElementById("todo-finished-section");
@@ -1418,13 +1508,16 @@ function openTodoEditDialog(todo) {
 }
 
 function wireTodoEvents() {
-  const form = document.getElementById("todo-form");
+  const form = document.getElementById("todo-add-form");
   const input = document.getElementById("todo-input");
   const jiraInput = document.getElementById("todo-jira");
   const priorityInput = document.getElementById("todo-priority");
   const list = document.getElementById("todo-list");
   const finishedList = document.getElementById("todo-finished-list");
   const clear = document.getElementById("todo-clear");
+  const addButton = document.getElementById("todo-add-button");
+  const addDialog = document.getElementById("todo-add-dialog");
+  const addCancel = document.getElementById("todo-add-cancel");
   const search = document.getElementById("todo-search");
   const handleTodoToggle = event => {
     const control = event.target;
@@ -1443,6 +1536,8 @@ function wireTodoEvents() {
     }
     saveTodos(); renderTodos();
   };
+  addButton?.addEventListener("click", () => { addDialog?.showModal(); input?.focus(); });
+  addCancel?.addEventListener("click", () => addDialog?.close());
   form.addEventListener("submit", event => {
     event.preventDefault();
     const text = input.value.trim();
@@ -1504,6 +1599,68 @@ function offsetDate(ds, d) {
   const x = new Date(`${ds}T12:00:00`);
   x.setDate(x.getDate() + d);
   return x.toISOString().slice(0, 10);
+}
+
+function monthBounds(ds) {
+  const value = String(ds || localDateKey()).slice(0, 10);
+  const [yearText, monthText] = value.split("-");
+  const year = Number(yearText);
+  const month = Number(monthText);
+  if (!year || !month) return { start: value, end: value };
+  const start = `${yearText}-${String(month).padStart(2, "0")}-01`;
+  const end = localDateKey(new Date(year, month, 0, 12));
+  return { start, end };
+}
+
+function suggestedExportPeriod() {
+  const anchorDate = String(el.dayPicker?.value || today).slice(0, 10) || today;
+  if (currentView === "week") {
+    const start = weekStart(anchorDate);
+    return { from: start, to: offsetDate(start, 6), label: `Current week (${start} to ${offsetDate(start, 6)})` };
+  }
+  if (currentView === "month") {
+    const { start, end } = monthBounds(anchorDate);
+    return { from: start, to: end, label: `Current month (${start} to ${end})` };
+  }
+  if (currentView === "sprint") {
+    const { sprint } = resolveSprintSelection();
+    if (sprint?.start && sprint?.end) return { from: sprint.start, to: sprint.end, label: `${sprint.name} (${sprint.start} to ${sprint.end})` };
+  }
+  return { from: anchorDate, to: anchorDate, label: `Current day (${anchorDate})` };
+}
+
+function sanitizeExportValue(value) {
+  if (value == null) return value;
+  if (Array.isArray(value)) return value.map(sanitizeExportValue);
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "object") {
+    if (typeof value.toDate === "function") {
+      const date = value.toDate();
+      if (date instanceof Date && !Number.isNaN(date.getTime())) return date.toISOString();
+    }
+    const out = {};
+    Object.entries(value).forEach(([key, item]) => {
+      out[key] = sanitizeExportValue(item);
+    });
+    return out;
+  }
+  return value;
+}
+
+function exportFileName(from, to) {
+  return `worklog-export-${String(from || "").slice(0, 10)}${from === to ? "" : `-to-${String(to || "").slice(0, 10)}`}.json`;
+}
+
+function downloadJsonFile(filename, payload) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 function parseBoolParam(value) {
@@ -1698,20 +1855,62 @@ function jiraIssueMatchesDropdownSearch(issue, query) {
   return !query || text.includes(query.toLowerCase());
 }
 
-function updateJiraDropdown(searchQuery = "") {
-  const list = document.getElementById("jira-issue-options");
-  if (!list) return;
-  const query = String(searchQuery || "").trim();
-  list.innerHTML = "";
-  sortedCurrentSprintIssues()
-    .filter(issue => jiraIssueMatchesDropdownSearch(issue, query))
-    .forEach(issue => {
-      const option = document.createElement("option");
-      const status = jiraIssueStatus(issue);
-      option.value = issue.key;
-      option.label = issue.key + " - " + (issue.summary || "").slice(0, 80) + (status ? " [" + status + "]" : "");
-      list.appendChild(option);
+function initJiraIssueSelect() {
+  const $ = window.jQuery;
+  if (!$ || !$.fn?.select2 || !el.jiraSelect) return;
+  const select = $(el.jiraSelect);
+  if (!select.hasClass("select2-hidden-accessible")) {
+    select.select2({
+      width: "100%",
+      dropdownParent: $(el.dialog),
+      placeholder: "Pick from current sprint",
+      allowClear: true,
+      dropdownAutoWidth: true,
+      matcher: (params, data) => {
+        const term = String(params.term || "").trim().toLowerCase();
+        if (!term) return data;
+        const issue = jiraIssueCache.find(item => item.key === data.id);
+        const haystack = [data.text, issue?.key, issue?.summary, jiraIssueStatus(issue)].join(" ").toLowerCase();
+        return haystack.includes(term) ? data : null;
+      }
     });
+    select.on("select2:open.worklogJiraFocus", () => {
+      window.setTimeout(() => {
+        const search = document.querySelector(".select2-container--open .select2-search__field");
+        if (search) search.focus();
+      }, 0);
+    });
+  }
+}
+
+function setJiraIssueSelectValue(issueKey) {
+  if (!el.jiraSelect) return;
+  const key = String(issueKey || "").trim().toUpperCase();
+  if (key && !Array.from(el.jiraSelect.options).some(option => option.value === key)) {
+    const issue = jiraIssueCache.find(item => String(item?.key || "").trim().toUpperCase() === key);
+    const option = document.createElement("option");
+    option.value = key;
+    option.textContent = issue ? key + " - " + (issue.summary || "").slice(0, 80) : key;
+    el.jiraSelect.appendChild(option);
+  }
+  el.jiraSelect.value = key;
+  initJiraIssueSelect();
+  if (window.jQuery && window.jQuery.fn?.select2) window.jQuery(el.jiraSelect).trigger("change");
+}
+function updateJiraDropdown() {
+  if (!el.jiraSelect) return;
+  const cur = el.jiraSelect.value;
+  el.jiraSelect.innerHTML = '<option value="">Pick from current sprint</option>';
+  sortedCurrentSprintIssues().forEach(issue => {
+    const option = document.createElement("option");
+    option.value = issue.key;
+    const status = jiraIssueStatus(issue);
+    option.textContent = issue.key + " - " + (issue.summary || "").slice(0, 80) + (status ? " [" + status + "]" : "");
+    el.jiraSelect.appendChild(option);
+  });
+  el.jiraSelect.value = cur;
+  initJiraIssueSelect();
+  if (window.jQuery && window.jQuery.fn?.select2) window.jQuery(el.jiraSelect).trigger("change");
   renderCurrentSprintIssues();
 }
 function jiraIssueStatus(issue) {
@@ -1745,6 +1944,11 @@ function jiraIssueStoryPoints(issue) {
   const value = issue?.storyPoints ?? fields[fieldId];
   if (value && typeof value === "object") return String(value.value ?? value.name ?? "").trim();
   return value === null || value === undefined ? "" : String(value).trim();
+}
+function jiraIssueStatusBadge(issueKey) {
+  const issue = jiraIssueCache.find(item => String(item?.key || "").trim().toUpperCase() === String(issueKey || "").trim().toUpperCase());
+  const status = jiraIssueStatus(issue);
+  return issue && status ? `<span class='jira-status'>${escapeHtml(status)}</span>` : "";
 }
 function normalizeJiraIssue(issue) {
   const fields = issue?.fields || {};
@@ -1793,7 +1997,8 @@ async function ensureJiraIssueCached(issueKey) {
 }
 
 function currentSprint() {
-  return sprintCache.find(s => s.start <= today && s.end >= today) || null;
+  const currentDate = localDateKey();
+  return sprintCache.find(s => s.start <= currentDate && s.end >= currentDate) || null;
 }
 
 function renderCurrentSprintIssues(message = "") {
@@ -1859,8 +2064,9 @@ function openEditor(entry, defaults = null) {
   el.start.value = editing ? entry.start : (preset.start || "09:00");
   el.end.value = editing ? (entry.end || "") : (preset.end || "");
   el.tag.value = editing ? (entry.tag || "other") : (preset.tag || "task");
-  el.jira.value = editing ? (entry.jiraIssue || "") : (preset.jiraIssue || "");
-  el.jiraSelect.value = "";
+  const selectedJiraIssue = editing ? (entry.jiraIssue || "") : (preset.jiraIssue || "");
+  el.jira.value = selectedJiraIssue;
+  setJiraIssueSelectValue(selectedJiraIssue);
   el.reason.value = editing ? (entry.reason || "Done") : "Done";
   el.overtime.checked = editing ? !!entry.isOvertime : !!preset.isOvertime;
   el.noJira.checked = editing ? !!entry.noJira : !!preset.noJira;
@@ -2171,6 +2377,106 @@ function selectedSprintEntries() {
   return filterEntries(allEntries.filter(e => e.date >= sprint.start && e.date <= sprint.end));
 }
 
+function sprintSummaryRequestBody(sprint, entries) {
+  const linkedEntries = entries.filter(entry => !entry.noJira && String(entry.jiraIssue || "").trim());
+  const issues = [...new Set(linkedEntries.map(entry => String(entry.jiraIssue).trim().toUpperCase()))]
+    .map(key => {
+      const cached = jiraIssueCache.find(issue => String(issue?.key || "").toUpperCase() === key);
+      return {
+        key,
+        summary: String(cached?.summary || jiraIssueSummaryByKey[key] || ""),
+        status: jiraIssueStatus(cached || {}),
+        storyPoints: jiraIssueStoryPoints(cached || {}) || null,
+        worklog: linkedEntries
+          .filter(entry => String(entry.jiraIssue).trim().toUpperCase() === key)
+          .map(entry => ({
+            date: entry.date,
+            start: entry.start,
+            end: entry.end || "",
+            task: entry.task,
+            note: entry.note || "",
+            jiraLogged: !!entry.jiraLogged,
+            overtime: !!(entry.isOvertime || entry.tag === "overtime"),
+            tag: entry.tag || ""
+          }))
+      };
+    });
+  const totalMinutes = linkedEntries.reduce((sum, entry) => sum + (entry.end ? Math.max(0, mins(entry.end) - mins(entry.start)) : 0), 0);
+  return {
+    body: JSON.stringify({
+      sprint,
+      totals: {
+        linkedIssues: issues.length,
+        blocks: linkedEntries.length,
+        minutes: totalMinutes,
+        duration: durLabel(totalMinutes),
+        effortPoints: effortPointsLabel(totalMinutes) || null
+      },
+      issues
+    })
+  };
+}
+
+function sprintSummaryResponseText(rawText) {
+  if (!rawText) return "The summary completed without response content.";
+  try {
+    let value = JSON.parse(rawText);
+    if (value && typeof value === "object") {
+      const candidate = value.summaryDetails ?? value.summary_details ?? value.summary ?? value.details ?? value.body;
+      if (typeof candidate === "string") {
+        try { value = JSON.parse(candidate); } catch (_) { return candidate; }
+      } else if (candidate != null) {
+        value = candidate;
+      }
+    }
+    return typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  } catch (_) {
+    return rawText;
+  }
+}
+
+async function summarizeSelectedSprint() {
+  const { sprint } = resolveSprintSelection();
+  if (!sprint) return alert("Select a sprint before requesting a summary.");
+  const targetUrl = String(cfg.sprintSummaryUrl || "").trim();
+  if (!targetUrl) return alert("The Sprint Summary API URL is not configured in config.js.");
+  const entries = selectedSprintEntries();
+  const linkedEntryCount = entries.filter(entry => !entry.noJira && String(entry.jiraIssue || "").trim()).length;
+  if (!linkedEntryCount) return alert("This sprint has no linked Jira issues to summarize.");
+  el.sprintSummaryTitle.textContent = `${sprint.name} summary`;
+  el.sprintSummaryStatus.textContent = "Generating summary...";
+  el.sprintSummaryContent.textContent = "Sending sprint details to Power Automate.";
+  el.copySprintSummaryBtn.hidden = true;
+  currentSprintSummaryText = "";
+  el.sprintSummaryDialog.showModal();
+  el.summarizeSprintBtn.disabled = true;
+  try {
+    const response = await fetch(targetUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(sprintSummaryRequestBody(sprint, entries))
+    });
+    const rawText = await response.text();
+    if (!response.ok) {
+      let message = rawText;
+      try {
+        const data = JSON.parse(rawText);
+        message = data?.error?.message || data?.error || data?.message || rawText;
+      } catch (_) {}
+      throw new Error(String(message || `HTTP ${response.status}`));
+    }
+    currentSprintSummaryText = sprintSummaryResponseText(rawText);
+    el.sprintSummaryContent.textContent = currentSprintSummaryText;
+    el.sprintSummaryStatus.textContent = `Summary generated from ${linkedEntryCount} linked worklog block${linkedEntryCount === 1 ? "" : "s"}.`;
+    el.copySprintSummaryBtn.hidden = false;
+  } catch (error) {
+    el.sprintSummaryStatus.textContent = "Could not generate the sprint summary.";
+    el.sprintSummaryContent.textContent = String(error?.message || error);
+  } finally {
+    el.summarizeSprintBtn.disabled = !currentUser;
+  }
+}
+
 function normalizeSprint(s) {
   return {
     name: String(s?.name || "").trim(),
@@ -2249,9 +2555,10 @@ function renderSprintView() {
         ? ""
         : (summary || fallbackSummary || (jiraIssueLookupPending.has(issue) ? "Loading Jira summary..." : "Summary unavailable"));
       const issueEffortLabel = totalPoints ? `${totalPoints} pt` : "";
+      const statusBadge = issue === "UNLINKED" ? "" : jiraIssueStatusBadge(issue);
       const issueTitle = issue === "UNLINKED"
         ? `<div class='sprint-issue-heading'><span class='badge warn'>Unlinked</span><span class='sprint-issue-summary'>No Jira issue linked</span>${issueEffortLabel ? `<span class='badge sprint-issue-effort'>${escapeHtml(issueEffortLabel)}</span>` : ""}</div>`
-        : `<div class='sprint-issue-heading' data-jira-issue='${escapeHtml(issue)}'><span class='badge'>${escapeHtml(issue)}</span><span class='sprint-issue-summary'>${escapeHtml(summaryLabel)}</span>${issueEffortLabel ? `<span class='badge sprint-issue-effort'>${escapeHtml(issueEffortLabel)}</span>` : ""}</div>`;
+        : `<div class='sprint-issue-heading' data-jira-issue='${escapeHtml(issue)}'><span class='badge'>${escapeHtml(issue)}</span><span class='sprint-issue-summary'>${escapeHtml(summaryLabel)}</span>${statusBadge}${issueEffortLabel ? `<span class='badge sprint-issue-effort'>${escapeHtml(issueEffortLabel)}</span>` : ""}</div>`;
       const openAttr = openIssues.has(issue) ? " open" : "";
       const cardClasses = `block sprint-issue-card${allLogged ? " is-fully-logged" : ""}`;
       const borderColor = sprintIssueColor(issue);
@@ -2325,6 +2632,10 @@ async function toggleIssueLogged(issueKey, checked) {
   await loadEntries();
 }
 
+async function markIssueRowsLogged(issueKey) {
+  await toggleIssueLogged(issueKey, true);
+}
+
 async function toggleEntryLogged(id, checked) {
   if (!currentUser || !id) return;
   await setDoc(doc(db, `users/${currentUser.uid}/entries/${id}`), {
@@ -2360,133 +2671,61 @@ function render() {
   }
 }
 
-function parseEndReason(task) {
-  const m = /^\[END:\s*(.*)\]$/.exec(String(task || "").trim());
-  return m ? m[1].trim() : "";
-}
-
-function looksLikeCloudEntry(entry) {
-  return !!entry && typeof entry === "object" && !!entry.date && !!entry.start && !!entry.task;
-}
-
-function makeStableImportId(entry) {
-  if (entry.id) return String(entry.id);
-  const raw = `${entry.date}|${entry.start}|${entry.task}|${entry.note || ""}`;
-  let hash = 0;
-  for (let i = 0; i < raw.length; i += 1) hash = ((hash << 5) - hash + raw.charCodeAt(i)) | 0;
-  const stamp = `${entry.date || "0000-00-00"}`.replaceAll("-", "") + (entry.start || "00:00").replaceAll(":", "");
-  return `${stamp}_${Math.abs(hash)}`;
-}
-
-function normalizeCloudEntry(entry) {
-  const tag = String(entry.tag || "other").trim() || "other";
-  const slot = !!entry.isBackgroundSlot || isTimeslotTag(tag) || !!entry.noJira || !!entry.no_jira;
-  return {
-    id: makeStableImportId(entry),
-    task: String(entry.task || "").trim(),
-    note: String(entry.note || "").trim(),
-    date: String(entry.date || "").slice(0, 10),
-    location: normalizeLocation(entry.location),
-    start: String(entry.start || "").slice(0, 5),
-    end: String(entry.end || "").slice(0, 5),
-    tag,
-    jiraIssue: slot ? "" : String(entry.jiraIssue || entry.jira_issue || "").trim().toUpperCase(),
-    jiraLogged: slot ? false : (!!entry.jiraLogged || !!entry.jira_logged),
-    noJira: slot ? true : (!!entry.noJira || !!entry.no_jira),
-    isBackgroundSlot: slot,
-    isOvertime: !!entry.isOvertime,
-    reason: String(entry.reason || "").trim()
-  };
-}
-
-function parseLegacyEntries(rawEntries) {
-  const sorted = [...rawEntries].filter(e => e && typeof e === "object").sort((a, b) => String(a.timestamp || "").localeCompare(String(b.timestamp || "")));
-  const out = [];
-  for (let i = 0; i < sorted.length; i += 1) {
-    const cur = sorted[i];
-    if ((cur.type || "start") === "end") continue;
-    let nextSameDay = null;
-    for (let j = i + 1; j < sorted.length; j += 1) {
-      if (sorted[j].date === cur.date) { nextSameDay = sorted[j]; break; }
-      if (sorted[j].date && cur.date && sorted[j].date !== cur.date) break;
-    }
-    const tag = String(cur.tag || "other").trim() || "other";
-    const slot = isTimeslotTag(tag) || !!cur.no_jira;
-    out.push({
-      id: makeStableImportId({ id: cur.id, date: cur.date, start: cur.time, task: cur.task, note: cur.note }),
-      task: String(cur.task || "").trim(),
-      note: String(cur.note || "").trim(),
-      date: String(cur.date || "").slice(0, 10),
-      location: "work",
-      start: String(cur.time || "").slice(0, 5),
-      end: nextSameDay ? String(nextSameDay.time || "").slice(0, 5) : "",
-      tag,
-      jiraIssue: slot ? "" : String(cur.jira_issue || "").trim().toUpperCase(),
-      jiraLogged: slot ? false : !!cur.jira_logged,
-      noJira: slot,
-      isBackgroundSlot: slot,
-      isOvertime: cur.tag === "overtime",
-      reason: nextSameDay && nextSameDay.type === "end" ? parseEndReason(nextSameDay.task) : ""
-    });
+function openExportDialog() {
+  if (!currentUser || !db) {
+    alert("Sign in first to export your Firebase work log.");
+    return;
   }
-  return out;
-}
-
-function normalizeImportPayload(payload) {
-  const rows = Array.isArray(payload) ? payload : (Array.isArray(payload?.entries) ? payload.entries : (Array.isArray(payload?.logs) ? payload.logs : null));
-  if (!rows) throw new Error("Expected a JSON array, or an object containing entries/logs array.");
-  if (rows.every(looksLikeCloudEntry)) return rows.map(normalizeCloudEntry).filter(e => e.task && e.date && e.start);
-  const seemsLegacy = rows.some(e => e && (e.type === "start" || e.type === "end" || e.timestamp || e.time));
-  if (seemsLegacy) return parseLegacyEntries(rows).filter(e => e.task && e.date && e.start);
-  throw new Error("Unrecognized JSON schema for log import.");
-}
-
-async function importEntries(entries) {
-  if (!currentUser || !entries.length) return;
-  if (!window.confirm(`Import ${entries.length} entries into your cloud log?`)) return;
-  const colPath = `users/${currentUser.uid}/entries`;
-  for (let i = 0; i < entries.length; i += 400) {
-    const batch = writeBatch(db);
-    entries.slice(i, i + 400).forEach(entry => {
-      const id = makeStableImportId(entry);
-      batch.set(doc(db, `${colPath}/${id}`), { ...entry, id, updatedAt: serverTimestamp(), importedAt: serverTimestamp() }, { merge: true });
-    });
-    await batch.commit();
+  if (!el.exportDialog || !el.exportFrom || !el.exportTo || !el.exportStatus) {
+    alert("Export UI is not available on this page build yet.");
+    return;
   }
-  await loadEntries();
-  alert(`Imported ${entries.length} entries.`);
+  const { from, to, label } = suggestedExportPeriod();
+  el.exportFrom.value = from;
+  el.exportTo.value = to;
+  el.exportStatus.textContent = `Default period: ${label}. Adjust the dates if needed.`;
+  el.exportDialog.showModal();
 }
 
-async function handleImportFile(file) {
-  if (!file) return;
+async function exportEntriesForPeriod(event) {
+  event.preventDefault();
+  if (!currentUser || !db) return alert("Sign in first to export your Firebase work log.");
+  const from = String(el.exportFrom.value || "").slice(0, 10);
+  const to = String(el.exportTo.value || "").slice(0, 10);
+  if (!from || !to) return alert("Choose both start and end dates.");
+  if (to < from) return alert("The end date must be on or after the start date.");
+  el.exportDownloadBtn.disabled = true;
+  el.exportStatus.textContent = `Exporting Firebase entries from ${from} to ${to}...`;
   try {
-    const payload = JSON.parse(await file.text());
-    await importEntries(normalizeImportPayload(payload));
+    const entriesRef = collection(db, `users/${currentUser.uid}/entries`);
+    const snapshot = await getDocs(query(entriesRef, where("date", ">=", from), where("date", "<=", to)));
+    const entries = sortedEntries(snapshot.docs
+      .map(docSnapshot => sanitizeExportValue({ id: docSnapshot.id, ...docSnapshot.data() }))
+      .filter(entry => String(entry?.date || "").slice(0, 10) >= from && String(entry?.date || "").slice(0, 10) <= to));
+    const payload = {
+      source: "firebase",
+      exportedAt: new Date().toISOString(),
+      period: { from, to },
+      user: {
+        uid: currentUser.uid,
+        email: String(currentUser.email || "")
+      },
+      entryCount: entries.length,
+      entries
+    };
+    downloadJsonFile(exportFileName(from, to), payload);
+    el.exportStatus.textContent = `Downloaded ${entries.length} entr${entries.length === 1 ? "y" : "ies"}.`;
+    el.exportDialog.close();
   } catch (err) {
-    alert(`Import failed: ${String(err.message || err)}`);
+    el.exportStatus.textContent = `Export failed: ${String(err?.message || err)}`;
   } finally {
-    el.importFile.value = "";
+    el.exportDownloadBtn.disabled = false;
   }
 }
 
-async function loadEntries() {
-  if (!currentUser) return;
-  const col = collection(db, `users/${currentUser.uid}/entries`);
-  try {
-    const snap = await getDocs(query(col, orderBy("date"), orderBy("start")));
-    allEntries = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-  } catch (err) {
-    if (String(err?.code || "").includes("failed-precondition")) {
-      const snap = await getDocs(col);
-      allEntries = sortedEntries(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-      el.authLabel.textContent = "Signed in (fallback query active; create Firestore index for speed)";
-    } else {
-      throw err;
-    }
-  }
+function loadEntries() {
   render();
 }
-
 async function createTimeslotEntry(date, start, end, isOvertime) {
   if (!currentUser) return;
   if (!date || !start || !end) return;
@@ -2509,7 +2748,7 @@ async function createTimeslotEntry(date, start, end, isOvertime) {
   };
   const error = validateRange(entry, "");
   if (error) {
-    alert(error);
+    toast(error, "warn");
     return;
   }
   const id = `${date.replaceAll("-", "")}${start.replaceAll(":", "")}_${crypto.randomUUID().slice(0, 8)}`;
@@ -2531,7 +2770,7 @@ async function saveEntry(evt) {
     start: el.start.value,
     end: endValue,
     tag: el.tag.value || "other",
-    jiraIssue: (el.jira.value || "").trim().toUpperCase(),
+    jiraIssue: String(el.jiraSelect?.value || el.jira.value || "").trim().toUpperCase(),
     jiraLogged: !!el.jiraLogged.checked,
     noJira: !!el.noJira.checked,
     isOvertime: !!el.overtime.checked,
@@ -2546,13 +2785,19 @@ async function saveEntry(evt) {
     entry.jiraIssue = "";
     entry.jiraLogged = false;
   }
-  if (!entry.task) return alert("Task is required.");
+  if (!entry.task) {
+    toast("Task is required.", "warn");
+    return;
+  }
   const error = validateRange(entry, rawId);
-  if (error) return alert(error);
+  if (error) {
+    toast(error, "warn");
+    return;
+  }
   const id = rawId || `${entry.date.replaceAll("-", "")}${entry.start.replaceAll(":", "")}_${crypto.randomUUID().slice(0, 8)}`;
   await setDoc(doc(db, `users/${currentUser.uid}/entries/${id}`), entry, { merge: true });
   if (entry.jiraIssue && !entry.noJira) {
-    if (!rawId) await moveNewBlockJiraIssueToInProgress(entry.jiraIssue);
+    await moveNewBlockJiraIssueToInProgress(entry.jiraIssue);
     ensureJiraIssueCached(entry.jiraIssue);
   }
   el.dialog.close();
@@ -2706,8 +2951,8 @@ function pbiJiraFieldSpecs(issue, editMeta = {}) {
   ];
   const storyPointsFieldId = String(userJiraSettings.storyPointsFieldId || "").trim();
   if (storyPointsFieldId) specs.push({ key: "story_points", jiraId: storyPointsFieldId, label: "Story point estimate" });
-  if (type === "bug") specs.push({ key: "module_or_screen", jiraId: "customfield_10086", label: "Module or screen" }, { key: "expected_behavior", jiraId: "customfield_10085", label: "Expected behavior" });
-  if (type === "story") specs.push({ key: "actor", jiraId: "customfield_10081", label: "Actor" }, { key: "use_case_goal", jiraId: "customfield_10080", label: "Use case goal" }, { key: "acceptance_criteria", jiraId: "customfield_10083", label: "Acceptance criteria" });
+  if (type.startsWith("bug")) specs.push({ key: "module_or_screen", jiraId: "customfield_10086", label: "Module or screen" }, { key: "expected_behavior", jiraId: "customfield_10085", label: "Expected behavior" });
+  if (type.startsWith("story")) specs.push({ key: "actor", jiraId: "customfield_10081", label: "Actor" }, { key: "use_case_goal", jiraId: "customfield_10080", label: "Use case goal" }, { key: "acceptance_criteria", jiraId: "customfield_10083", label: "Acceptance criteria" });
   if (type === "task") specs.push({ key: "outcome", jiraId: "customfield_10121", label: "Outcome" });
   return specs;
 }
@@ -2726,11 +2971,15 @@ function showJiraIssueDetails(issue, editMeta = {}) {
   jiraIssueDraft = issue;
   jiraIssueEditMeta = editMeta || {};
   const fields = issue.fields || {};
-  const specs = pbiJiraFieldSpecs(issue, jiraIssueEditMeta);
+  const statusName = jiraIssueStatus(issue);
+  const specs = [
+    { key: "status", jiraId: "status", label: "Status", readonlyValue: statusName },
+    ...pbiJiraFieldSpecs(issue, jiraIssueEditMeta)
+  ];
   el.jiraIssueTitle.textContent = String(issue.key || "Jira Issue") + " · " + String(fields.summary || "");
   el.jiraIssueBody.innerHTML = specs.map(spec => {
     const meta = jiraIssueEditMeta[spec.jiraId];
-    const value = jiraDetailText(fields[spec.jiraId]);
+    const value = spec.readonlyValue !== undefined ? spec.readonlyValue : jiraDetailText(fields[spec.jiraId]);
     const editable = !!meta && Array.isArray(meta.operations) && meta.operations.includes("set");
     const content = editable ? '<div class="jira-field-display">' + escapeHtml(value || "Not set") + '</div><button type="button" class="btn jira-edit-field" data-jira-edit-field="' + escapeHtml(spec.jiraId) + '" data-jira-pbi-key="' + escapeHtml(spec.key) + '">Edit</button>' : '<div class="jira-detail-value">' + escapeHtml(value || "Not set") + "</div>";
     return '<div class="jira-detail-row"><div class="jira-detail-label">' + escapeHtml(spec.label) + (editable ? ' <span class="jira-editable-label">editable</span>' : "") + "</div>" + content + "</div>";
@@ -2746,7 +2995,7 @@ async function viewJiraIssue(issueKey) {
     ]);
     showJiraIssueDetails(results[0].issue || {}, results[1].fields || {});
   } catch (err) {
-    alert("Could not load " + issueKey + ": " + String(err.message || err));
+    toast("Could not load " + issueKey + ": " + String(err.message || err), "error");
   }
 }
 
@@ -2770,9 +3019,9 @@ async function saveJiraIssueChanges() {
     const refreshed = await jiraWorkerFetch("/jira/issue?key=" + encodeURIComponent(jiraIssueDraft.key), { key: jiraIssueDraft.key });
     showJiraIssueDetails(refreshed.issue || jiraIssueDraft, jiraIssueEditMeta);
     await fetchJiraIssues();
-    alert("Jira issue updated.");
+    toast("Jira issue updated.", "success");
   } catch (err) {
-    alert("Could not save Jira changes: " + String(err.message || err));
+    toast("Could not save Jira changes: " + String(err.message || err), "error");
   }
 }
 
@@ -2846,7 +3095,10 @@ async function moveJiraIssue(issueKey) {
       const destination = String(item.to || "").trim().toLowerCase();
       return destination && (!currentStatus || destination !== String(currentStatus).trim().toLowerCase());
     });
-    if (!available.length) return alert("No status changes are available for " + issueKey + ".");
+    if (!available.length) {
+      toast("No status changes are available for " + issueKey + ".", "warn");
+      return;
+    }
     const transition = await chooseJiraTransition(issueKey, available, currentStatus);
     if (!transition) return;
     await jiraWorkerFetch("/jira/transition?key=" + encodeURIComponent(issueKey), {
@@ -2857,23 +3109,38 @@ async function moveJiraIssue(issueKey) {
     const movedFromInProgress = String(currentStatus || "").trim().toLowerCase() === "in progress";
     const qaMentionAdded = movedFromInProgress && movedToQaTesting ? await addQaTestingMentionComment(issueKey) : false;
     await fetchJiraIssues();
-    alert(issueKey + " moved to " + (transition.to || transition.name) + (movedToQaTesting && !qaMentionAdded ? ". Scrum Team comment was not added." : "."));
+    toast(issueKey + " moved to " + (transition.to || transition.name) + (movedToQaTesting && !qaMentionAdded ? ". Scrum Team comment was not added." : "."), movedToQaTesting && !qaMentionAdded ? "warn" : "success");
   } catch (err) {
-    alert("Could not move " + issueKey + ": " + String(err.message || err));
+    toast("Could not move " + issueKey + ": " + String(err.message || err), "error");
   }
+}
+
+function isTodoStatusName(value) {
+  const status = String(value || "").trim().toLowerCase().replace(/[\s_-]+/g, "");
+  return status === "todo" || status === "backlog" || status === "open" || status === "new";
+}
+
+function isInProgressStatusName(value) {
+  const status = String(value || "").trim().toLowerCase().replace(/[\s_-]+/g, "");
+  return status === "inprogress" || status === "doing" || status === "development" || status === "dev";
 }
 
 async function moveNewBlockJiraIssueToInProgress(issueKey) {
   const key = String(issueKey || "").trim().toUpperCase();
-  const sprint = currentSprint();
-  const issue = jiraIssueCache.find(item => String(item?.key || "").trim().toUpperCase() === key);
-  if (!sprint || !issue || jiraIssueStatus(issue).trim().toLowerCase() !== "to do") return false;
+  if (!key) return false;
 
   try {
-    const data = await jiraWorkerFetch("/jira/transitions?key=" + encodeURIComponent(key), { key });
-    const transition = (data.transitions || []).find(item => String(item?.to || "").trim().toLowerCase() === "in progress");
+    const [issueData, transitionData] = await Promise.all([
+      jiraWorkerFetch("/jira/issue?key=" + encodeURIComponent(key), { key }),
+      jiraWorkerFetch("/jira/transitions?key=" + encodeURIComponent(key), { key })
+    ]);
+    const currentStatus = String(issueData.issue?.fields?.status?.name || "").trim();
+    if (!isTodoStatusName(currentStatus)) return false;
+
+    const transition = (transitionData.transitions || []).find(item => isInProgressStatusName(item?.to || item?.name));
     if (!transition?.id) return false;
     await jiraWorkerFetch("/jira/transition?key=" + encodeURIComponent(key), { key, transitionId: transition.id });
+
     const cached = jiraIssueCache.find(item => String(item?.key || "").trim().toUpperCase() === key);
     if (cached) cached.status = "In Progress";
     updateJiraDropdown();
@@ -2891,16 +3158,58 @@ async function commentOnJiraIssue(issueKey) {
       key: issueKey,
       comment
     });
-    alert("Comment added to " + issueKey + ".");
+    toast("Comment added to " + issueKey + ".", "success");
   } catch (err) {
-    alert("Could not add the comment: " + String(err.message || err));
+    toast("Could not add the comment: " + String(err.message || err), "error");
+  }
+}
+
+function closestFibonacciEstimate(value) {
+  const raw = Number(value);
+  if (!Number.isFinite(raw) || raw <= 0) return 0;
+  const choices = [1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144];
+  return choices.reduce((best, next) => Math.abs(next - raw) < Math.abs(best - raw) ? next : best, choices[0]);
+}
+
+function issueWorklogEffortPoints(issueKey) {
+  const totalMinutes = issueRowsForJiraIssue(issueKey).rows.reduce((sum, entry) => {
+    return sum + (entry.end ? Math.max(0, mins(entry.end) - mins(entry.start)) : 0);
+  }, 0);
+  return totalMinutes > 0 ? totalMinutes / 90 : 0;
+}
+
+async function setStoryPointEstimateFromWorklog(issueKey) {
+  const fieldId = String(userJiraSettings.storyPointsFieldId || "").trim();
+  if (!fieldId) {
+    toast("Add the Story Point Estimate custom field in Jira Settings first.", "warn");
+    return;
+  }
+  const estimate = closestFibonacciEstimate(issueWorklogEffortPoints(issueKey));
+  if (!estimate) {
+    toast("No completed worklog time found for " + issueKey + ".", "warn");
+    return;
+  }
+  try {
+    await jiraWorkerFetch("/jira/update?key=" + encodeURIComponent(issueKey), {
+      key: issueKey,
+      fields: { [fieldId]: estimate }
+    });
+    const cached = jiraIssueCache.find(item => String(item?.key || "").trim().toUpperCase() === String(issueKey || "").trim().toUpperCase());
+    if (cached) cached.storyPoints = estimate;
+    updateJiraDropdown();
+    toast(issueKey + " story point estimate set to " + estimate + ".", "success");
+  } catch (err) {
+    toast("Could not set story points for " + issueKey + ": " + String(err.message || err), "error");
   }
 }
 
 async function addTodoForJira(issueKey) {
   const summary = jiraIssueSummaryByKey[issueKey] || "";
   const existing = todos.find(item => item.jiraIssue === issueKey && !item.done);
-  if (existing) return alert(issueKey + " is already in your open to-do list.");
+  if (existing) {
+    toast(issueKey + " is already in your open to-do list.", "warn");
+    return;
+  }
   todos.unshift({
     id: crypto.randomUUID(),
     text: summary ? issueKey + ": " + summary : issueKey,
@@ -2922,7 +3231,7 @@ function showJiraContextMenu(issueKey, x, y) {
   hideJiraContextMenu();
   const menu = document.createElement("div");
   menu.className = "jira-context-menu";
-  menu.innerHTML = "<button data-jira-menu='view'>View issue</button><button data-jira-menu='uat'>UAT test case</button><button data-jira-menu='rows-description'>Add rows to Description</button><button data-jira-menu='rows-comment'>Add rows to comments</button><button data-jira-menu='comment'>Add comment</button><button data-jira-menu='move'>Change status</button><button data-jira-menu='todo'>Add to to-do list</button>";
+  menu.innerHTML = "<button data-jira-menu='view'>View issue</button><button data-jira-menu='uat'>UAT test case</button><button data-jira-menu='story-points'>Set story points from worklog</button><button data-jira-menu='rows-description'>Add rows to Description</button><button data-jira-menu='rows-comment'>Add rows to comments</button><button data-jira-menu='comment'>Add comment</button><button data-jira-menu='move'>Change status</button><button data-jira-menu='todo'>Add to to-do list</button>";
   menu.style.left = Math.min(x, window.innerWidth - 190) + "px";
   menu.style.top = Math.min(y, window.innerHeight - 290) + "px";
   menu.addEventListener("click", async event => {
@@ -2930,6 +3239,7 @@ function showJiraContextMenu(issueKey, x, y) {
     hideJiraContextMenu();
     if (action === "view") await viewJiraIssue(issueKey);
     if (action === "uat") openUatDialog(issueKey);
+    if (action === "story-points") await setStoryPointEstimateFromWorklog(issueKey);
     if (action === "rows-description") await addIssueRowsToDescription(issueKey);
     if (action === "rows-comment") await addIssueRowsToComment(issueKey);
     if (action === "move") await moveJiraIssue(issueKey);
@@ -3023,35 +3333,43 @@ function issueRowsText(issueKey) {
 
 async function addIssueRowsToDescription(issueKey) {
   const data = issueRowsForJiraIssue(issueKey);
-  if (!data.rows.length) return alert("No worklog rows found for " + issueKey + " in the selected sprint.");
+  if (!data.rows.length) {
+    toast("No worklog rows found for " + issueKey + " in the selected sprint.", "warn");
+    return;
+  }
   if (!window.confirm("Replace the Jira description for " + issueKey + " with its worklog rows?")) return;
   try {
     await jiraWorkerFetch("/jira/update?key=" + encodeURIComponent(issueKey), {
       key: issueKey,
       fields: { description: jiraAdfTableFromRows(data.headers, data.values) }
     });
-    alert("Description updated for " + issueKey + ".");
+    await markIssueRowsLogged(issueKey);
+    toast("Description updated for " + issueKey + ".", "success");
   } catch (err) {
-    alert("Could not update the description for " + issueKey + ": " + String(err.message || err));
+    toast("Could not update the description for " + issueKey + ": " + String(err.message || err), "error");
   }
 }
 
 async function addIssueRowsToComment(issueKey) {
   const data = issueRowsForJiraIssue(issueKey);
-  if (!data.rows.length) return alert("No worklog rows found for " + issueKey + " in the selected sprint.");
+  if (!data.rows.length) {
+    toast("No worklog rows found for " + issueKey + " in the selected sprint.", "warn");
+    return;
+  }
   try {
     await jiraWorkerFetch("/jira/comment?key=" + encodeURIComponent(issueKey), {
       key: issueKey,
       commentBody: jiraAdfTableFromRows(data.headers, data.values)
     });
-    alert("Worklog rows added as a comment to " + issueKey + ".");
+    await markIssueRowsLogged(issueKey);
+    toast("Worklog rows added as a comment to " + issueKey + ".", "success");
   } catch (err) {
-    alert("Could not add worklog rows to " + issueKey + ": " + String(err.message || err));
+    toast("Could not add worklog rows to " + issueKey + ": " + String(err.message || err), "error");
   }
 }function copyIssueRows(issueKey) {
   const data = issueRowsForJiraIssue(issueKey);
   if (!data.rows.length) return;
-  writeTableClipboard(data.headers, data.values).then(() => alert(`Copied ${data.rows.length} rows for ${issueKey}.`));
+  writeTableClipboard(data.headers, data.values).then(() => toast(`Copied ${data.rows.length} rows for ${issueKey}.`, "success"));
 }
 
 function copyInternalRows() {
@@ -3069,7 +3387,7 @@ function copyInternalRows() {
       (e.note || "").replaceAll("\n", " ")
     ].join("\t"));
   });
-  navigator.clipboard.writeText(out.join("\n")).then(() => alert(`Copied ${rows.length} internal row(s).`));
+  navigator.clipboard.writeText(out.join("\n")).then(() => toast(`Copied ${rows.length} internal row(s).`, "success"));
 }
 
 async function writeTableClipboard(headers, rows) {
@@ -3090,12 +3408,15 @@ async function writeTableClipboard(headers, rows) {
 function copyExcelRows() {
   const monthPrefix = String(el.dayPicker.value || today).slice(0, 7);
   const rows = sortedEntries(allEntries.filter(e => String(e.date || "").startsWith(monthPrefix) && !!e.end && (!!e.isOvertime || e.tag === "overtime")));
-  if (!rows.length) return alert("No overtime rows found for the selected month.");
+  if (!rows.length) {
+    toast("No overtime rows found for the selected month.", "warn");
+    return;
+  }
   const out = [];
   rows.forEach(e => {
     out.push([formatExportDate(e.date), locationLabel(e.location), e.start, e.end || ""].join("\t"));
   });
-  navigator.clipboard.writeText(out.join("\n")).then(() => alert(`Copied ${rows.length} overtime row(s) for ${monthPrefix}.`));
+  navigator.clipboard.writeText(out.join("\n")).then(() => toast(`Copied ${rows.length} overtime row(s) for ${monthPrefix}.`, "success"));
 }
 
 // Timeslots are now created per day via right-click drag + slot type chooser.
@@ -3112,6 +3433,7 @@ function friendlyAuthError(err) {
 
 function wireEvents() {
   wireDragSelectionGuard();
+  const hasExportUi = !!(el.exportBtn && el.exportDialog && el.exportForm && el.exportFrom && el.exportTo && el.exportStatus && el.exportCancelBtn && el.exportDownloadBtn);
   const updateThemeButton = () => {
     const light = document.documentElement.dataset.theme === "light";
     el.themeBtn.textContent = light ? "☾ Dark" : "☀ Light";
@@ -3125,16 +3447,28 @@ function wireEvents() {
     updateThemeButton();
   });
   el.pbiCreatorBtn.addEventListener("click", openPbiCreatorDialog);
-  el.importBtn.addEventListener("click", () => el.importFile.click());
-  el.importFile.addEventListener("change", async () => handleImportFile(el.importFile.files && el.importFile.files[0]));
+  if (hasExportUi) {
+    el.exportBtn.addEventListener("click", openExportDialog);
+    el.exportForm.addEventListener("submit", exportEntriesForPeriod);
+    el.exportCancelBtn.addEventListener("click", () => el.exportDialog.close());
+  }
   el.jiraSettingsBtn.addEventListener("click", openJiraSettingsDialog);
   el.login.addEventListener("click", async () => {
-    if (!auth) return alert("Firebase is not initialized. Check web/github-pages-worklog/config.js.");
-    try { await signInWithPopup(auth, new GoogleAuthProvider()); } catch (err) { alert(`Sign-in failed: ${friendlyAuthError(err)}`); }
+    if (!auth) {
+      toast("Firebase is not initialized. Check web/github-pages-worklog/config.js.", "error");
+      return;
+    }
+    try { await signInWithPopup(auth, new GoogleAuthProvider()); } catch (err) { toast(`Sign-in failed: ${friendlyAuthError(err)}`, "error"); }
   });
   el.logout.addEventListener("click", () => signOut(auth));
   el.newBtn.addEventListener("click", () => openEditor(null));
   el.copyExcelBtn.addEventListener("click", copyExcelRows);
+  el.summarizeSprintBtn.addEventListener("click", summarizeSelectedSprint);
+  el.copySprintSummaryBtn.addEventListener("click", async () => {
+    if (!currentSprintSummaryText) return;
+    await navigator.clipboard.writeText(currentSprintSummaryText);
+    el.sprintSummaryStatus.textContent = "Summary copied to the clipboard.";
+  });
   el.filterTag.addEventListener("change", render);
   el.filterJira.addEventListener("change", render);
   el.dayPicker.addEventListener("change", () => {
@@ -3208,12 +3542,13 @@ function wireEvents() {
   el.jiraSettingsCancel.addEventListener("click", () => el.jiraSettingsDialog.close());
   el.jiraSettingsClear.addEventListener("click", clearJiraSettings);
   el.cancelBtn.addEventListener("click", () => el.dialog.close());
-  el.jiraSelect.addEventListener("input", () => {
-    updateJiraDropdown(el.jiraSelect.value);
-  });
-  el.jiraSelect.addEventListener("change", () => {
-    if (el.jiraSelect.value) el.jira.value = el.jiraSelect.value;
-  });
+  const syncJiraSelectToInput = () => {
+    el.jira.value = el.jiraSelect.value || "";
+  };
+  el.jiraSelect.addEventListener("change", syncJiraSelectToInput);
+  if (window.jQuery && window.jQuery.fn?.select2) {
+    window.jQuery(el.jiraSelect).on("change.worklogJiraSelect", syncJiraSelectToInput);
+  }
   el.sprintIssuesList.addEventListener("click", event => {
     const issue = event.target.closest("[data-jira-issue]")?.dataset.jiraIssue;
     if (issue) openEditor(null, { jiraIssue: issue });
@@ -3326,7 +3661,7 @@ function initFirebase() {
   if (!ok) {
     el.authLabel.textContent = "Set firebase config in config.js";
     el.login.disabled = true;
-    el.importBtn.disabled = true;
+    if (el.exportBtn) el.exportBtn.disabled = true;
     el.jiraSettingsBtn.disabled = true;
     el.newBtn.disabled = true;
     return false;
@@ -3348,11 +3683,14 @@ async function boot() {
     el.login.hidden = signedIn;
     el.logout.hidden = !signedIn;
     el.newBtn.disabled = !signedIn;
-    el.importBtn.disabled = !signedIn;
+    if (el.exportBtn) el.exportBtn.disabled = !signedIn;
     el.jiraSettingsBtn.disabled = !signedIn;
     el.copyExcelBtn.disabled = !signedIn;
+    el.summarizeSprintBtn.disabled = !signedIn;
     el.authLabel.textContent = signedIn ? `Signed in as ${user.email}` : (quickActionState.pending ? "Quick action ready — sign in to submit it" : "Not signed in");
     if (!signedIn) {
+      if (liveRefreshTimer) window.clearInterval(liveRefreshTimer);
+  if (todayRefreshTimer) window.clearInterval(todayRefreshTimer);
       userJiraSettings = emptyJiraSettings();
       jiraUnlockSource = "";
       resetJiraCaches();
@@ -3361,14 +3699,27 @@ async function boot() {
       render();
       return;
     }
-    await loadCloudTodos();
+    startFirestoreListeners();
     await loadJiraSettings();
-    await Promise.all([loadEntries(), fetchJiraSprints()]);
+    await fetchJiraSprints();
     await fetchJiraIssues();
+    startLiveRefresh();
     await applyQuickActionIfNeeded();
     updateSprintAutoOption();
     updateJiraStatus();
     render();
+  });
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && currentUser) refreshLiveData();
+});
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./service-worker.js").catch(error => {
+      console.warn("Work Log service worker registration failed:", error);
+    });
   });
 }
 
