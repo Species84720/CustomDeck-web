@@ -350,6 +350,13 @@ body { background-color:#080b14; background-image:radial-gradient(circle at 12% 
 html[data-theme="light"] .jira-story-points { border-color:#c7d2fe;background:#eef2ff;color:#4338ca; }
 .sprint-issue-card.is-fully-logged { opacity:.62; filter:saturate(.72); }
 .sprint-issue-card.is-fully-logged:hover { opacity:.72; }
+.sprint-issue-card.has-estimate-mismatch,
+.sprint-issue-card.has-estimate-mismatch:hover { border-color:#ef4444; border-left-color:#ef4444 !important; background:rgba(239,68,68,.13); opacity:1; filter:none; }
+.estimate-mismatch-note { color:#fca5a5; font-size:12px; margin-top:8px; }
+html[data-theme="light"] .sprint-issue-card.has-estimate-mismatch,
+html[data-theme="light"] .sprint-issue-card.has-estimate-mismatch.is-fully-logged { background:#fef2f2; opacity:1; filter:none; }
+html[data-theme="light"] .estimate-mismatch-note { color:#b91c1c; }
+.time-gap-list { display:flex; gap:6px; flex-wrap:wrap; margin:8px 0 12px; }
 .sprint-internal-card { border-left-color:#6b7280 !important; }
 .pbi-dialog { width:min(1100px,96vw); }
 .pbi-dialog form { gap:14px; }

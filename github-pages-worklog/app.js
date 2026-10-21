@@ -2185,8 +2185,8 @@ function openEditor(entry, defaults = null) {
   const preset = defaults || {};
   el.title.textContent = editing ? "Edit Block" : "New Block";
   el.id.value = editing ? entry.id : "";
-  el.task.value = editing ? entry.task : "";
-  el.note.value = editing ? (entry.note || "") : "";
+  el.task.value = editing ? entry.task : (preset.task || "");
+  el.note.value = editing ? (entry.note || "") : (preset.note || "");
   el.date.value = editing ? entry.date : (preset.date || el.dayPicker.value || today);
   el.location.value = editing ? normalizeLocation(entry.location) : normalizeLocation(preset.location);
   el.start.value = editing ? entry.start : (preset.start || "09:00");
@@ -2204,6 +2204,82 @@ function openEditor(entry, defaults = null) {
   el.jiraLogged.checked = editing ? !!entry.jiraLogged : false;
   el.deleteBtn.hidden = !editing;
   el.dialog.showModal();
+}
+
+function quickBlockDefaults(kind, date) {
+  const presets = {
+    daily: { task: "Daily", tag: "meeting", start: "08:45", end: "09:00", jiraIssue: "GROUP: Daily" },
+    food: { task: "Food", tag: "other", start: "11:45", end: "12:30", jiraIssue: "GROUP: Food" }
+  };
+  return presets[kind] ? { ...presets[kind], date, noJira: true } : null;
+}
+
+function openQuickBlock(kind) {
+  if (!currentUser) return;
+  const defaults = quickBlockDefaults(kind, el.dayPicker.value || localDateKey());
+  if (!defaults) return;
+  const existing = allEntries.find(entry => entry.date === defaults.date && String(entry.task || "").toLowerCase() === defaults.task.toLowerCase());
+  if (existing) {
+    toast(defaults.task + " already exists on this date. Opened it for editing.", "info");
+    openEditor(existing);
+  } else {
+    openEditor(null, defaults);
+  }
+}
+
+function mergeTimeRanges(ranges) {
+  const merged = [];
+  [...ranges].filter(([start, end]) => end > start).sort((a, b) => a[0] - b[0]).forEach(([start, end]) => {
+    const previous = merged.at(-1);
+    if (previous && start <= previous[1]) previous[1] = Math.max(previous[1], end);
+    else merged.push([start, end]);
+  });
+  return merged;
+}
+
+function unrecordedTimeRanges(entries, cutoff = 1440) {
+  const scheduled = mergeTimeRanges(entries.filter(isBackgroundSlot).filter(entry => entry.end)
+    .map(entry => [mins(entry.start), Math.min(mins(entry.end), cutoff)]));
+  const recorded = mergeTimeRanges(entries.filter(entry => !isBackgroundSlot(entry))
+    .map(entry => [mins(entry.start), Math.min(entry.end ? mins(entry.end) : cutoff, cutoff)]));
+  const gaps = [];
+  scheduled.forEach(([start, end]) => {
+    let cursor = start;
+    recorded.forEach(([from, to]) => {
+      if (from >= end || to <= cursor) return;
+      if (from > cursor) gaps.push([cursor, from]);
+      cursor = Math.max(cursor, to);
+    });
+    if (cursor < end) gaps.push([cursor, end]);
+  });
+  return gaps;
+}
+
+function buildDayGapReview() {
+  const date = el.dayPicker.value;
+  const now = new Date();
+  const todayKey = localDateKey(now);
+  const cutoff = date > todayKey ? 0 : (date === todayKey ? now.getHours() * 60 + now.getMinutes() : 1440);
+  const gaps = unrecordedTimeRanges(sortedForDay(date), cutoff);
+  const review = document.createElement("div");
+  if (!gaps.length) return review;
+  const label = document.createElement("div");
+  label.className = "muted";
+  label.textContent = "Unrecorded time in scheduled hours: " + durLabel(gaps.reduce((sum, [start, end]) => sum + end - start, 0)) + ". Select a gap to add a block.";
+  review.appendChild(label);
+  const list = document.createElement("div");
+  list.className = "time-gap-list";
+  gaps.forEach(([start, end]) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "btn";
+    button.disabled = !currentUser;
+    button.textContent = minToTime(start) + "–" + minToTime(end);
+    button.addEventListener("click", () => openEditor(null, { date, start: minToTime(start), end: minToTime(end) }));
+    list.appendChild(button);
+  });
+  review.appendChild(list);
+  return review;
 }
 
 function chooseSlotType() {
@@ -2673,7 +2749,7 @@ function renderSprintView() {
     byIssue.get(key).push(e);
   });
   const issueHtml = [...byIssue.entries()]
-    .sort((a, b) => b[1].length - a[1].length)
+    .sort(compareSprintIssueGroups)
     .map(([issue, rows]) => {
       if (issue !== "UNLINKED" && !isWorklogGroupKey(issue) && !Object.prototype.hasOwnProperty.call(jiraIssueSummaryByKey, issue)) ensureJiraIssueCached(issue);
       const total = rows.reduce((s, e) => s + (e.end ? Math.max(0, mins(e.end) - mins(e.start)) : 0), 0);
@@ -2684,6 +2760,7 @@ function renderSprintView() {
         ? ""
         : linkedIssueSummaryLabel(issue, rows);
       const estimate = jiraIssueStoryPoints(cachedJiraIssue(issue));
+      const comparison = sprintEstimateComparison(issue, total / 90);
       const issueEffortLabel = [totalPoints ? `${totalPoints} pt done` : "", estimate !== "" ? `${estimate} pt estimate` : ""].filter(Boolean).join(" · ");
       const statusBadge = issue === "UNLINKED" || isWorklogGroupKey(issue) ? "" : jiraIssueStatusBadge(issue);
       const issueBadge = isWorklogGroupKey(issue)
@@ -2693,7 +2770,7 @@ function renderSprintView() {
         ? `<div class='sprint-issue-heading'><span class='badge warn'>Unlinked</span><span class='sprint-issue-summary'>No Jira issue linked</span>${issueEffortLabel ? `<span class='badge sprint-issue-effort'>${escapeHtml(issueEffortLabel)}</span>` : ""}</div>`
         : `<div class='sprint-issue-heading' data-jira-issue='${escapeHtml(issue)}'>${issueBadge}<span class='sprint-issue-summary'>${escapeHtml(isWorklogGroupKey(issue) ? linkedIssueDisplayLabel(issue) : summaryLabel)}</span>${isWorklogGroupKey(issue) ? `<span class='badge sprint-issue-effort'>${rows.every(row => row.noJira) ? "Never log to Jira" : "Group"}</span>` : statusBadge}${issueEffortLabel ? `<span class='badge sprint-issue-effort'>${escapeHtml(issueEffortLabel)}</span>` : ""}</div>`;
       const openAttr = openIssues.has(issue) ? " open" : "";
-      const cardClasses = `block sprint-issue-card${allLogged ? " is-fully-logged" : ""}`;
+      const cardClasses = `block sprint-issue-card${allLogged ? " is-fully-logged" : ""}${comparison.mismatch ? " has-estimate-mismatch" : ""}`;
       const borderColor = sprintIssueColor(issue);
       const rowList = rows
         .sort((a, b) => `${a.date}T${a.start}`.localeCompare(`${b.date}T${b.start}`))
@@ -2711,6 +2788,7 @@ function renderSprintView() {
         <details data-sprint-issue='${escapeHtml(issue)}'${openAttr}>
           <summary class='head'><div class='task'>${issueTitle}</div><div class='meta'>${rows.length} blocks</div></summary>
           <div class='meta' style='margin-top:8px'>Total: ${durLabel(total)}${totalPoints ? ` (${totalPoints} pt)` : ""} | OT: ${durLabel(ot)}</div>
+          ${comparison.mismatch ? `<div class='estimate-mismatch-note'>Estimate mismatch: ${escapeHtml(comparison.rule)} effort is ${comparison.expected} pt; Jira estimate is ${escapeHtml(estimate)} pt.</div>` : ""}
           <div class='actions'>
             <label class='inline'><input type='checkbox' data-action='toggle-issue-logged' data-issue='${issue}' ${allLogged ? "checked" : ""} ${rows.every(row => row.noJira) ? "disabled" : ""}> Mark all logged</label>
             <button class='btn' data-action='copy-issue' data-issue='${issue}'>Copy Issue Rows</button>
@@ -2788,6 +2866,7 @@ function render() {
 
   if (currentView === "day") {
     el.timeline.innerHTML = "";
+    el.timeline.appendChild(buildDayGapReview());
     if (!dayEntries.length) {
       const tip = document.createElement("div");
       tip.className = "muted";
@@ -3314,8 +3393,39 @@ async function commentOnJiraIssue(issueKey) {
 function closestFibonacciEstimate(value) {
   const raw = Number(value);
   if (!Number.isFinite(raw) || raw <= 0) return 0;
-  const choices = [1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144];
+  const choices = [1, 2];
+  while (choices.at(-1) < raw) choices.push(choices.at(-1) + choices.at(-2));
   return choices.reduce((best, next) => Math.abs(next - raw) < Math.abs(best - raw) ? next : best, choices[0]);
+}
+
+function isBufferIssue(issueKey) {
+  const issue = cachedJiraIssue(issueKey);
+  const type = issue?.fields?.issuetype?.name || issue?.issuetype?.name || issue?.issuetype || jiraIssueTypeByKey[issueKey] || "";
+  return String(type).trim().toLowerCase() === "buffer";
+}
+
+function worklogEstimateForIssue(issueKey, points) {
+  return isBufferIssue(issueKey) ? Math.round(points) : closestFibonacciEstimate(points);
+}
+
+function sprintEstimateComparison(issueKey, points) {
+  const estimate = jiraIssueStoryPoints(cachedJiraIssue(issueKey));
+  const expected = worklogEstimateForIssue(issueKey, points);
+  return {
+    expected,
+    rule: isBufferIssue(issueKey) ? "Rounded" : "Fibonacci",
+    mismatch: isJiraIssueKey(issueKey) && points > 0 && estimate !== "" && Number.isFinite(Number(estimate)) && Number(estimate) !== expected
+  };
+}
+
+function sprintIssueGroupRank([issueKey, rows]) {
+  if (isWorklogGroupKey(issueKey)) return rows.every(row => row.noJira) ? 4 : 3;
+  if (issueKey === "UNLINKED") return 1;
+  return rows.every(row => row.jiraLogged) ? 2 : 0;
+}
+
+function compareSprintIssueGroups(a, b) {
+  return sprintIssueGroupRank(a) - sprintIssueGroupRank(b) || b[1].length - a[1].length || a[0].localeCompare(b[0]);
 }
 
 function issueWorklogEffortPoints(issueKey) {
@@ -3331,12 +3441,17 @@ async function setStoryPointEstimateFromWorklog(issueKey) {
     toast("Add the Story Point Estimate custom field in Jira Settings first.", "warn");
     return;
   }
-  const estimate = closestFibonacciEstimate(issueWorklogEffortPoints(issueKey));
-  if (!estimate) {
+  const points = issueWorklogEffortPoints(issueKey);
+  if (!(points > 0)) {
     toast("No completed worklog time found for " + issueKey + ".", "warn");
     return;
   }
   try {
+    if (!cachedJiraIssue(issueKey)) {
+      const data = await jiraWorkerFetch("/jira/issue", { key: issueKey });
+      rememberLinkedJiraIssue(data.issue);
+    }
+    const estimate = worklogEstimateForIssue(issueKey, points);
     await jiraWorkerFetch("/jira/update?key=" + encodeURIComponent(issueKey), {
       key: issueKey,
       fields: { [fieldId]: estimate }
@@ -3650,6 +3765,10 @@ function wireEvents() {
   });
   el.logout.addEventListener("click", () => signOut(auth));
   el.newBtn.addEventListener("click", () => openEditor(null));
+  document.getElementById("block-preset").addEventListener("change", event => {
+    openQuickBlock(event.target.value);
+    event.target.value = "";
+  });
   el.copyExcelBtn.addEventListener("click", copyExcelRows);
   el.summarizeSprintBtn.addEventListener("click", summarizeSelectedSprint);
   el.copySprintSummaryBtn.addEventListener("click", async () => {
@@ -3908,6 +4027,7 @@ async function boot() {
     el.login.hidden = signedIn;
     el.logout.hidden = !signedIn;
     el.newBtn.disabled = !signedIn;
+    document.getElementById("block-preset").disabled = !signedIn;
     if (el.exportBtn) el.exportBtn.disabled = !signedIn;
     el.jiraSettingsBtn.disabled = !signedIn;
     el.copyExcelBtn.disabled = !signedIn;
