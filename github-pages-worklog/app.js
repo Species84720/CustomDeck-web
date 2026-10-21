@@ -192,6 +192,8 @@ let db;
 let currentUser = null;
 let allEntries = [];
 let jiraIssueCache = [];
+let linkedJiraIssues = {};
+let jiraParentOptions = [];
 let jiraDropdownSearchBuffer = "";
 let jiraDropdownSearchTimer = null;
 let jiraIssueTypeByKey = {};
@@ -508,6 +510,8 @@ function updateJiraStatus(message = "") {
 }
 
 function resetJiraCaches() {
+  linkedJiraIssues = {};
+  jiraParentOptions = [];
   jiraIssueCache = [];
   jiraIssueTypeByKey = {};
   jiraIssueSummaryByKey = {};
@@ -1015,7 +1019,11 @@ async function copyUatIssueLink() {
 function openPbiCreatorDialog() {
   renderPbiHistory();
   if (!el.pbiInput.value.trim()) el.pbiInput.value = "";
-  if (!currentPbiDraftFields) resetPbiDraftEditor();
+  if (!currentPbiDraftFields) {
+    currentPbiDraftFields = {};
+    currentPbiIssueType = "Story";
+    renderPbiDraftForm();
+  }
   updatePbiStatus(getPbiDraftUrl()
     ? "Draft endpoint loaded from Jira Settings."
     : "Open Jira Settings and add the PBI Draft API endpoint before generating a draft.");
@@ -1148,11 +1156,15 @@ function createPbiField(key, value) {
     wrap.appendChild(select);
     return wrap;
   }
-  const useTextarea = Array.isArray(fieldValue) || typeof fieldValue === "object" || String(fieldValue || "").includes("\n") || String(fieldValue || "").length > 160 || key === "description" || key === "steps_to_reproduce" || key === "expected_behavior" || key === "acceptance_criteria" || key === "outcome";
+  const useTextarea = Array.isArray(fieldValue) || typeof fieldValue === "object" || String(fieldValue || "").includes("\n") || String(fieldValue || "").length > 160 || key === "description" || key === "use_case_goal" || key === "steps_to_reproduce" || key === "expected_behavior" || key === "acceptance_criteria" || key === "outcome";
   const input = document.createElement(useTextarea ? "textarea" : "input");
   input.name = key;
   input.className = "form-control";
   if (useTextarea) {
+    input.style.overflowY = "hidden";
+    const resize = () => { input.style.height = "auto"; input.style.height = input.scrollHeight + "px"; };
+    input.addEventListener("input", resize);
+    requestAnimationFrame(resize);
     input.rows = Array.isArray(fieldValue) ? Math.min(Math.max(fieldValue.length + 1, 4), 8) : 4;
     input.value = Array.isArray(fieldValue) ? fieldValue.join("\n") : (typeof fieldValue === "object" && fieldValue !== null ? JSON.stringify(fieldValue, null, 2) : String(fieldValue || ""));
     if (Array.isArray(fieldValue)) input.dataset.pbiArrayLines = "1";
@@ -1268,7 +1280,8 @@ async function submitPbiDraft() {
     body: String(el.pbiInput.value || "").trim(),
     classification: currentPbiClassification,
     issueType,
-    fields: currentPbiDraftFields
+    fields: currentPbiDraftFields,
+    assignToMe: document.getElementById("pbi-assign-to-me").checked
   };
   el.pbiDebugRequest.textContent = JSON.stringify(requestPayload, null, 2);
   el.pbiDebugResponse.textContent = "Creating Jira issue through worker...";
@@ -1276,6 +1289,12 @@ async function submitPbiDraft() {
   try {
     const result = await jiraWorkerFetch("/jira/pbi-create", requestPayload);
     el.pbiDebugResponse.textContent = JSON.stringify(result, null, 2);
+    el.pbiInput.value = "";
+    resetPbiDraftEditor();
+    currentPbiDraftFields = {};
+    currentPbiIssueType = "Story";
+    renderPbiDraftForm();
+    document.getElementById("pbi-assign-to-me").checked = false;
     updatePbiStatus(result?.key ? `Created ${result.key}.` : "Ticket created.", "ok");
   } catch (err) {
     el.pbiDebugResponse.textContent = JSON.stringify({ error: String(err?.message || err) }, null, 2);
@@ -1412,10 +1431,14 @@ async function refreshLiveData() {
   if (!currentUser || !db || liveRefreshPromise) return liveRefreshPromise;
   liveRefreshPromise = (async () => {
     refreshCurrentDate();
-    await fetchJiraSprints();
-    await fetchJiraIssues();
-    updateSprintAutoOption();
-    render();
+    if (!hasReadyJiraSettings()) return;
+    const sprintsChanged = await fetchJiraSprints();
+    const issuesChanged = await fetchJiraIssues();
+    const linkedChanged = await refreshLinkedJiraIssues();
+    if (sprintsChanged || issuesChanged || linkedChanged) {
+      updateSprintAutoOption();
+      render();
+    }
   })().catch(err => console.warn("Could not refresh live Jira data:", err)).finally(() => {
     liveRefreshPromise = null;
   });
@@ -1433,14 +1456,18 @@ function startFirestoreListeners() {
   const todosRef = doc(db, `users/${currentUser.uid}/settings/todos`);
   unsubscribeTodosListener = onSnapshot(todosRef, snapshot => {
     if (snapshot.exists() && Array.isArray(snapshot.data()?.items)) {
-      todos = normalizeTodos(snapshot.data().items);
+      const next = normalizeTodos(snapshot.data().items);
+      if (JSON.stringify(next) === JSON.stringify(todos)) return;
+      todos = next;
       localStorage.setItem(TODO_STORAGE_KEY, JSON.stringify(todos));
     }
     renderTodos();
   }, err => console.warn("Could not listen to-dos from Firebase:", err));
   const entriesRef = collection(db, `users/${currentUser.uid}/entries`);
   unsubscribeEntriesListener = onSnapshot(entriesRef, snapshot => {
-    allEntries = sortedEntries(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+    const next = sortedEntries(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+    if (JSON.stringify(next) === JSON.stringify(allEntries)) return;
+    allEntries = next;
     render();
   }, err => console.warn("Could not listen to worklog entries from Firebase:", err));
 }
@@ -1770,7 +1797,7 @@ function isRealJiraIssueValue(value) {
 }
 
 function linkedIssueSummaryLabel(issueKey, rows = []) {
-  if (isWorklogGroupKey(issueKey)) return "Provisional group for a future Jira issue";
+  if (isWorklogGroupKey(issueKey)) return "Worklog group";
   const summary = String(jiraIssueSummaryByKey[issueKey] || "").trim();
   const fallbackSummary = fallbackIssueSummary(issueKey, rows);
   return summary || fallbackSummary || (jiraIssueLookupPending.has(issueKey) ? "Loading Jira summary..." : "Summary unavailable");
@@ -1949,7 +1976,7 @@ function setJiraIssueSelectValue(issueKey) {
   if (isWorklogGroupKey(key)) {
     el.jiraSelect.value = "";
     initJiraIssueSelect();
-    if (window.jQuery && window.jQuery.fn?.select2) window.jQuery(el.jiraSelect).trigger("change");
+    if (window.jQuery && window.jQuery.fn?.select2) window.jQuery(el.jiraSelect).trigger("change.select2");
     return;
   }
   if (key && !Array.from(el.jiraSelect.options).some(option => option.value === key)) {
@@ -1961,7 +1988,7 @@ function setJiraIssueSelectValue(issueKey) {
   }
   el.jiraSelect.value = key;
   initJiraIssueSelect();
-  if (window.jQuery && window.jQuery.fn?.select2) window.jQuery(el.jiraSelect).trigger("change");
+  if (window.jQuery && window.jQuery.fn?.select2) window.jQuery(el.jiraSelect).trigger("change.select2");
 }
 function updateJiraDropdown() {
   if (!el.jiraSelect) return;
@@ -1974,9 +2001,13 @@ function updateJiraDropdown() {
     option.textContent = issue.key + " - " + (issue.summary || "").slice(0, 80) + (status ? " [" + status + "]" : "");
     el.jiraSelect.appendChild(option);
   });
+  if (cur && !Array.from(el.jiraSelect.options).some(option => option.value === cur)) {
+    const option = new Option(cur, cur);
+    el.jiraSelect.appendChild(option);
+  }
   el.jiraSelect.value = cur;
   initJiraIssueSelect();
-  if (window.jQuery && window.jQuery.fn?.select2) window.jQuery(el.jiraSelect).trigger("change");
+  if (window.jQuery && window.jQuery.fn?.select2) window.jQuery(el.jiraSelect).trigger("change.select2");
   renderCurrentSprintIssues();
 }
 function jiraIssueStatus(issue) {
@@ -2011,8 +2042,38 @@ function jiraIssueStoryPoints(issue) {
   if (value && typeof value === "object") return String(value.value ?? value.name ?? "").trim();
   return value === null || value === undefined ? "" : String(value).trim();
 }
+function cachedJiraIssue(key) {
+  return jiraIssueCache.find(issue => issue.key === key) || linkedJiraIssues[key];
+}
+
+function rememberLinkedJiraIssue(raw) {
+  const issue = normalizeJiraIssue(raw);
+  linkedJiraIssues[issue.key] = issue;
+  const index = jiraIssueCache.findIndex(item => item.key === issue.key);
+  if (index >= 0) jiraIssueCache[index] = { ...jiraIssueCache[index], summary: issue.summary, status: issue.status, issuetype: issue.issuetype, storyPoints: issue.storyPoints };
+  jiraIssueSummaryByKey[issue.key] = issue.summary;
+  jiraIssueTypeByKey[issue.key] = issue.issuetype;
+}
+
+async function refreshLinkedJiraIssues() {
+  if (!hasReadyJiraSettings()) return false;
+  const keys = [...new Set(selectedSprintEntries().map(entry => linkedIssueKey(entry.jiraIssue)).filter(isJiraIssueKey))];
+  let changed = false;
+  await Promise.all(keys.filter(key => !jiraIssueCache.some(issue => issue.key === key)).map(async key => {
+    try {
+      const data = await jiraWorkerFetch("/jira/issue", { key });
+      const issue = normalizeJiraIssue(data.issue);
+      if (JSON.stringify(linkedJiraIssues[key]) !== JSON.stringify(issue)) {
+        rememberLinkedJiraIssue(data.issue);
+        changed = true;
+      }
+    } catch (err) { console.warn("Could not refresh linked Jira issue", key, err); }
+  }));
+  return changed;
+}
+
 function jiraIssueStatusBadge(issueKey) {
-  const issue = jiraIssueCache.find(item => String(item?.key || "").trim().toUpperCase() === String(issueKey || "").trim().toUpperCase());
+  const issue = cachedJiraIssue(String(issueKey || "").trim().toUpperCase());
   const status = jiraIssueStatus(issue);
   return issue && status ? `<span class='jira-status'>${escapeHtml(status)}</span>` : "";
 }
@@ -2049,6 +2110,7 @@ async function ensureJiraIssueCached(issueKey) {
   jiraIssueLookupPending.add(key);
   try {
     const data = await jiraWorkerFetch("/jira/issue?key=" + encodeURIComponent(key), { key });
+    rememberLinkedJiraIssue(data.issue || { key });
     const issue = normalizeJiraIssue(data.issue || { key });
     if (issue.key) {
       jiraIssueSummaryByKey[issue.key] = String(issue.summary || "").trim();
@@ -2130,6 +2192,8 @@ function openEditor(entry, defaults = null) {
   el.start.value = editing ? entry.start : (preset.start || "09:00");
   el.end.value = editing ? (entry.end || "") : (preset.end || "");
   el.tag.value = editing ? (entry.tag || "other") : (preset.tag || "task");
+  const groups = [...new Set(allEntries.map(item => item.jiraIssue).filter(isWorklogGroupKey).map(linkedIssueDisplayLabel))].sort();
+  document.getElementById("worklog-groups").innerHTML = groups.map(group => `<option value="${escapeHtml(group)}"></option>`).join("");
   const selectedJiraIssue = normalizeLinkedIssueValue(editing ? (entry.jiraIssue || "") : (preset.jiraIssue || ""));
   el.jira.value = isWorklogGroupKey(selectedJiraIssue) ? linkedIssueDisplayLabel(selectedJiraIssue) : selectedJiraIssue;
   if (el.jiraGroup) el.jiraGroup.value = isWorklogGroupKey(selectedJiraIssue) ? linkedIssueDisplayLabel(selectedJiraIssue) : "";
@@ -2600,8 +2664,8 @@ function renderSprintView() {
     el.sprintView.innerHTML = `${sprintHeader}<div class='muted'>No sprint data for this selection.</div>`;
     return;
   }
-  const internalRows = entries.filter(e => !!e.noJira);
-  const scoped = entries.filter(e => !e.noJira);
+  const internalRows = entries.filter(e => !!e.noJira && !isWorklogGroupKey(e.jiraIssue));
+  const scoped = entries.filter(e => !e.noJira || isWorklogGroupKey(e.jiraIssue));
   const byIssue = new Map();
   scoped.forEach(e => {
     const key = linkedIssueKey(e.jiraIssue) || "UNLINKED";
@@ -2619,14 +2683,15 @@ function renderSprintView() {
       const summaryLabel = issue === "UNLINKED"
         ? ""
         : linkedIssueSummaryLabel(issue, rows);
-      const issueEffortLabel = totalPoints ? `${totalPoints} pt` : "";
+      const estimate = jiraIssueStoryPoints(cachedJiraIssue(issue));
+      const issueEffortLabel = [totalPoints ? `${totalPoints} pt done` : "", estimate !== "" ? `${estimate} pt estimate` : ""].filter(Boolean).join(" · ");
       const statusBadge = issue === "UNLINKED" || isWorklogGroupKey(issue) ? "" : jiraIssueStatusBadge(issue);
       const issueBadge = isWorklogGroupKey(issue)
         ? `<span class='badge group'>Group</span>`
         : `<span class='badge'>${escapeHtml(linkedIssueDisplayLabel(issue))}</span>`;
       const issueTitle = issue === "UNLINKED"
         ? `<div class='sprint-issue-heading'><span class='badge warn'>Unlinked</span><span class='sprint-issue-summary'>No Jira issue linked</span>${issueEffortLabel ? `<span class='badge sprint-issue-effort'>${escapeHtml(issueEffortLabel)}</span>` : ""}</div>`
-        : `<div class='sprint-issue-heading' data-jira-issue='${escapeHtml(issue)}'>${issueBadge}<span class='sprint-issue-summary'>${escapeHtml(isWorklogGroupKey(issue) ? linkedIssueDisplayLabel(issue) : summaryLabel)}</span>${isWorklogGroupKey(issue) ? `<span class='badge sprint-issue-effort'>Future Jira</span>` : statusBadge}${issueEffortLabel ? `<span class='badge sprint-issue-effort'>${escapeHtml(issueEffortLabel)}</span>` : ""}</div>`;
+        : `<div class='sprint-issue-heading' data-jira-issue='${escapeHtml(issue)}'>${issueBadge}<span class='sprint-issue-summary'>${escapeHtml(isWorklogGroupKey(issue) ? linkedIssueDisplayLabel(issue) : summaryLabel)}</span>${isWorklogGroupKey(issue) ? `<span class='badge sprint-issue-effort'>${rows.every(row => row.noJira) ? "Never log to Jira" : "Group"}</span>` : statusBadge}${issueEffortLabel ? `<span class='badge sprint-issue-effort'>${escapeHtml(issueEffortLabel)}</span>` : ""}</div>`;
       const openAttr = openIssues.has(issue) ? " open" : "";
       const cardClasses = `block sprint-issue-card${allLogged ? " is-fully-logged" : ""}`;
       const borderColor = sprintIssueColor(issue);
@@ -2637,7 +2702,7 @@ function renderSprintView() {
           const dur = r.end ? durLabel(minutes) : "Open";
           const points = effortPointsLabel(minutes);
           return `<div class='meta' style='padding:4px 0;border-top:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-wrap:wrap'>
-            <label class='inline' style='font-size:11px'><input type='checkbox' data-action='toggle-row-logged' data-id='${r.id}' ${r.jiraLogged ? "checked" : ""}>Logged</label>
+            <label class='inline' style='font-size:11px'><input type='checkbox' data-action='toggle-row-logged' data-id='${r.id}' ${r.jiraLogged ? "checked" : ""} ${r.noJira ? "disabled" : ""}>${r.noJira ? "Never log to Jira" : "Logged"}</label>
             <span>${r.date} ${r.start}${r.end ? `-${r.end}` : ""} · ${dur}${points ? ` · ${points} pt` : ""} · ${escapeHtml(r.task)}</span>
             <button class='btn' data-action='edit' data-id='${r.id}'>Edit</button>
           </div>`;
@@ -2647,7 +2712,7 @@ function renderSprintView() {
           <summary class='head'><div class='task'>${issueTitle}</div><div class='meta'>${rows.length} blocks</div></summary>
           <div class='meta' style='margin-top:8px'>Total: ${durLabel(total)}${totalPoints ? ` (${totalPoints} pt)` : ""} | OT: ${durLabel(ot)}</div>
           <div class='actions'>
-            <label class='inline'><input type='checkbox' data-action='toggle-issue-logged' data-issue='${issue}' ${allLogged ? "checked" : ""}> Mark all logged</label>
+            <label class='inline'><input type='checkbox' data-action='toggle-issue-logged' data-issue='${issue}' ${allLogged ? "checked" : ""} ${rows.every(row => row.noJira) ? "disabled" : ""}> Mark all logged</label>
             <button class='btn' data-action='copy-issue' data-issue='${issue}'>Copy Issue Rows</button>
           </div>
           ${rowList}
@@ -2685,7 +2750,7 @@ async function toggleIssueLogged(issueKey, checked) {
   if (!currentUser) return;
   const key = linkedIssueKey(issueKey);
   if (!key) return;
-  const rows = selectedSprintEntries().filter(e => linkedIssueKey(e.jiraIssue) === key);
+  const rows = selectedSprintEntries().filter(e => !e.noJira && linkedIssueKey(e.jiraIssue) === key);
   if (!rows.length) return;
   for (let i = 0; i < rows.length; i += 400) {
     const batch = writeBatch(db);
@@ -2830,7 +2895,9 @@ async function saveEntry(evt) {
   const rawId = el.id.value.trim();
   const endValue = String(el.end.value || "").trim();
   const reasonValue = String(el.reason.value || "").trim();
-  const linkedIssue = normalizeLinkedIssueValue(el.jiraSelect?.value || el.jira.value || el.jiraGroup?.value || "");
+  const linkedIssue = el.jiraSelect?.value
+    ? normalizeLinkedIssueValue(el.jiraSelect.value)
+    : (el.jiraGroup?.value.trim() ? formatWorklogGroup(el.jiraGroup.value) : normalizeLinkedIssueValue(el.jira.value));
   const entry = {
     task: el.task.value.trim(),
     note: el.note.value.trim(),
@@ -2848,10 +2915,10 @@ async function saveEntry(evt) {
   };
   if (isTimeslotTag(entry.tag)) {
     entry.isBackgroundSlot = true;
-    entry.noJira = !entry.jiraIssue;
+    entry.noJira = entry.noJira || !entry.jiraIssue;
   }
   if (entry.noJira) {
-    entry.jiraIssue = "";
+    if (!isWorklogGroupKey(entry.jiraIssue)) entry.jiraIssue = "";
     entry.jiraLogged = false;
   }
   if (!entry.task) {
@@ -2867,7 +2934,7 @@ async function saveEntry(evt) {
   await setDoc(doc(db, `users/${currentUser.uid}/entries/${id}`), entry, { merge: true });
   if (entry.jiraIssue && !entry.noJira) {
     if (isRealJiraIssueValue(entry.jiraIssue)) {
-      await moveNewBlockJiraIssueToInProgress(entry.jiraIssue);
+      if (!rawId) await moveNewBlockJiraIssueToInProgress(entry.jiraIssue);
       ensureJiraIssueCached(entry.jiraIssue);
     }
   }
@@ -2894,7 +2961,7 @@ async function applyQuickStartAction(action) {
   if (!entry.task) throw new Error("Quick start is missing a task.");
   if (!entry.date || !entry.start) throw new Error("Quick start requires date and start time.");
   if (entry.noJira) {
-    entry.jiraIssue = "";
+    if (!isWorklogGroupKey(entry.jiraIssue)) entry.jiraIssue = "";
     entry.jiraLogged = false;
   }
   const id = action.id || `${entry.date.replaceAll("-", "")}${entry.start.replaceAll(":", "")}_${crypto.randomUUID().slice(0, 8)}`;
@@ -3030,6 +3097,7 @@ function pbiJiraFieldSpecs(issue, editMeta = {}) {
 
 function jiraFieldInput(fieldId, meta, currentValue, logicalKey = fieldId) {
   const value = jiraDetailText(currentValue);
+  if (logicalKey === "parent") return `<select data-jira-field="parent" data-jira-pbi-key="parent"><option value="">No parent</option>${jiraParentOptions.map(parent => `<option value="${escapeHtml(parent.key)}"${parent.key === currentValue?.key ? " selected" : ""}>${escapeHtml(parent.key + " · " + parent.summary)}</option>`).join("")}</select>`;
   if (logicalKey === "story_points") return '<input type="number" min="0" step="0.5" data-jira-field="' + escapeHtml(fieldId) + '" data-jira-pbi-key="story_points" value="' + escapeHtml(value) + '">';
   if (logicalKey === "priority") return '<select data-jira-field="' + escapeHtml(fieldId) + '" data-jira-pbi-key="priority">' + ["Highest", "High", "Medium", "Low", "Lowest"].map(option => '<option value="' + option + '"' + (option.toLowerCase() === value.toLowerCase() ? " selected" : "") + '>' + option + '</option>').join("") + "</select>";
   const allowed = Array.isArray(meta?.allowedValues) ? meta.allowedValues : [];
@@ -3045,6 +3113,7 @@ function showJiraIssueDetails(issue, editMeta = {}) {
   const statusName = jiraIssueStatus(issue);
   const specs = [
     { key: "status", jiraId: "status", label: "Status", readonlyValue: statusName },
+    { key: "parent", jiraId: "parent", label: "Parent Feature" },
     ...pbiJiraFieldSpecs(issue, jiraIssueEditMeta)
   ];
   el.jiraIssueTitle.textContent = String(issue.key || "Jira Issue") + " · " + String(fields.summary || "");
@@ -3062,8 +3131,12 @@ async function viewJiraIssue(issueKey) {
   try {
     const results = await Promise.all([
       jiraWorkerFetch("/jira/issue?key=" + encodeURIComponent(issueKey), { key: issueKey }),
-      jiraWorkerFetch("/jira/editmeta?key=" + encodeURIComponent(issueKey), { key: issueKey })
+      jiraWorkerFetch("/jira/editmeta?key=" + encodeURIComponent(issueKey), { key: issueKey }),
+      jiraWorkerFetch("/jira/parents").catch(err => { toast("Could not load Feature parents: " + err.message, "warn"); return { issues: [] }; })
     ]);
+    jiraParentOptions = (results[2].issues || []).filter(issue => issue.key !== issueKey);
+    const parent = results[0].issue?.fields?.parent;
+    if (parent?.key && !jiraParentOptions.some(issue => issue.key === parent.key)) jiraParentOptions.unshift({ key: parent.key, summary: parent.fields?.summary || "Current parent" });
     showJiraIssueDetails(results[0].issue || {}, results[1].fields || {});
   } catch (err) {
     toast("Could not load " + issueKey + ": " + String(err.message || err), "error");
@@ -3078,7 +3151,8 @@ async function saveJiraIssueChanges() {
     const logicalKey = control.dataset.jiraPbiKey || fieldId;
     const meta = jiraIssueEditMeta[fieldId] || {};
     const value = control.value.trim();
-    if (logicalKey === "story_points") fields[fieldId] = value === "" ? null : Number(value);
+    if (logicalKey === "parent") fields[fieldId] = value ? { key: value } : null;
+    else if (logicalKey === "story_points") fields[fieldId] = value === "" ? null : Number(value);
     else if (logicalKey === "priority") fields[fieldId] = value ? { name: value } : null;
     else if (["description", "expected_behavior", "use_case_goal", "acceptance_criteria", "outcome"].includes(logicalKey)) fields[fieldId] = jiraAdfFromText(value);
     else if (String(meta.schema?.type || "").toLowerCase() === "array") fields[fieldId] = value ? value.split(",").map(item => item.trim()).filter(Boolean) : [];
@@ -3088,7 +3162,9 @@ async function saveJiraIssueChanges() {
   try {
     await jiraWorkerFetch("/jira/update?key=" + encodeURIComponent(jiraIssueDraft.key), { key: jiraIssueDraft.key, fields });
     const refreshed = await jiraWorkerFetch("/jira/issue?key=" + encodeURIComponent(jiraIssueDraft.key), { key: jiraIssueDraft.key });
+    rememberLinkedJiraIssue(refreshed.issue || jiraIssueDraft);
     showJiraIssueDetails(refreshed.issue || jiraIssueDraft, jiraIssueEditMeta);
+    render();
     await fetchJiraIssues();
     toast("Jira issue updated.", "success");
   } catch (err) {
@@ -3198,7 +3274,7 @@ function isInProgressStatusName(value) {
 
 async function moveNewBlockJiraIssueToInProgress(issueKey) {
   const key = String(issueKey || "").trim().toUpperCase();
-  if (!key) return false;
+  if (!key || !jiraIssueCache.some(issue => issue.key === key)) return false;
 
   try {
     const [issueData, transitionData] = await Promise.all([
@@ -3267,6 +3343,8 @@ async function setStoryPointEstimateFromWorklog(issueKey) {
     });
     const cached = jiraIssueCache.find(item => String(item?.key || "").trim().toUpperCase() === String(issueKey || "").trim().toUpperCase());
     if (cached) cached.storyPoints = estimate;
+    if (linkedJiraIssues[issueKey]) linkedJiraIssues[issueKey].storyPoints = estimate;
+    render();
     updateJiraDropdown();
     toast(issueKey + " story point estimate set to " + estimate + ".", "success");
   } catch (err) {
@@ -3373,16 +3451,17 @@ async function fetchJiraIssues() {
   try {
     const sprint = currentSprint();
     if (!sprint) {
+      const changed = jiraIssueCache.length > 0;
       jiraIssueCache = [];
-      updateJiraDropdown();
+      if (changed) updateJiraDropdown();
       updateJiraStatus(`Jira: no active sprint found · ${jiraSettingsSummary()}`);
-      return;
+      return changed;
     }
-    renderCurrentSprintIssues(`Loading ${sprint.name}...`);
+
     const data = await jiraWorkerFetch(`/jira/issues?sprint=${encodeURIComponent(sprint.name)}`);
-    jiraIssueCache = (data.issues || []).map(normalizeJiraIssue).filter(issue => issue.key);
-    jiraIssueTypeByKey = {};
-    jiraIssueSummaryByKey = {};
+    const next = (data.issues || []).map(normalizeJiraIssue).filter(issue => issue.key).sort((a, b) => a.key.localeCompare(b.key));
+    if (JSON.stringify(next) === JSON.stringify(jiraIssueCache)) return false;
+    jiraIssueCache = next;
     jiraIssueCache.forEach(issue => {
       const key = String(issue?.key || "").trim().toUpperCase();
       if (!key) return;
@@ -3391,10 +3470,10 @@ async function fetchJiraIssues() {
     });
     updateJiraStatus(`Jira: ${jiraIssueCache.length} issues in ${sprint.name} · ${jiraSettingsSummary()}`);
     updateJiraDropdown();
+    return true;
   } catch (err) {
-    resetJiraCaches();
-    renderCurrentSprintIssues(String(err.message || err));
     updateJiraStatus(`Jira: ${String(err.message || err)}`);
+    return false;
   }
 }
 
@@ -3407,13 +3486,15 @@ async function fetchJiraSprints() {
   }
   try {
     const data = await jiraWorkerFetch("/jira/sprints");
-    sprintCache = sortSprintsDesc((data.sprints || []).map(normalizeSprint));
+    const next = sortSprintsDesc((data.sprints || []).map(normalizeSprint));
+    if (JSON.stringify(next) === JSON.stringify(sprintCache)) return false;
+    sprintCache = next;
     refreshSprintSelect();
     renderCurrentSprintIssues();
-  } catch (_) {
-    sprintCache = [];
-    refreshSprintSelect();
-    renderCurrentSprintIssues();
+    return true;
+  } catch (err) {
+    console.warn("Could not refresh Jira sprints:", err);
+    return false;
   }
 }
 
@@ -3664,6 +3745,19 @@ function wireEvents() {
     el.jira.value = el.jiraSelect.value || "";
     if (el.jiraSelect.value && el.jiraGroup) el.jiraGroup.value = "";
   };
+  el.jira.addEventListener("input", () => {
+    const typed = el.jira.value;
+    setJiraIssueSelectValue("");
+    el.jira.value = typed;
+    if (el.jiraGroup) el.jiraGroup.value = "";
+  });
+  el.jiraGroup?.addEventListener("input", () => {
+    const group = el.jiraGroup.value;
+    setJiraIssueSelectValue("");
+    el.jira.value = group;
+    const existing = allEntries.filter(entry => linkedIssueKey(entry.jiraIssue) === formatWorklogGroup(group));
+    if (existing.length) el.noJira.checked = existing.every(entry => entry.noJira);
+  });
   el.jiraSelect.addEventListener("change", syncJiraSelectToInput);
   if (window.jQuery && window.jQuery.fn?.select2) {
     window.jQuery(el.jiraSelect).on("change.worklogJiraSelect", syncJiraSelectToInput);
@@ -3678,7 +3772,6 @@ function wireEvents() {
     }
     setJiraIssueSelectValue("");
     el.jira.value = linkedIssueDisplayLabel(group);
-    el.noJira.checked = false;
     toast("Linked to group: " + linkedIssueDisplayLabel(group), "success");
   });
   el.sprintIssuesList.addEventListener("click", event => {

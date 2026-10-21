@@ -164,7 +164,8 @@
           <input id="f-jira" placeholder="CPM-123">
           <select id="f-jira-select"><option value="">Pick from current sprint</option></select>
           <div class="jira-group-row">
-            <input id="f-jira-group" placeholder="Future issue group">
+            <input id="f-jira-group" list="worklog-groups" placeholder="Choose or create a group">
+            <datalist id="worklog-groups"></datalist>
             <button id="btn-jira-group" class="btn" type="button">Use Group</button>
           </div>
         </label>
@@ -349,6 +350,7 @@
           <section id="pbi-editor-section" class="pbi-editor-section" hidden>
             <div class="todo-section-label">Review &amp; edit draft</div>
             <div id="pbi-dynamic-form" class="pbi-dynamic-form"></div>
+            <label class="inline"><input id="pbi-assign-to-me" type="checkbox"> Assign to me</label>
             <button id="btn-pbi-submit" type="button" class="btn primary">Confirm &amp; Create Ticket</button>
           </section>
         </section>

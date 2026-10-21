@@ -5,7 +5,8 @@
   "description": "Static work logger for GitHub Pages with Firebase auth/storage",
   "scripts": {
     "dev": "npx http-server . -p 4173 -c-1",
-    "check": "node --check app.js"
+    "check": "node --check app.js",
+    "test": "node regression-test.cjs"
   },
   "devDependencies": {
     "http-server": "^14.1.1"
